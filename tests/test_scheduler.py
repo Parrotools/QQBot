@@ -1,0 +1,97 @@
+from datetime import UTC, datetime
+
+import pytest
+
+from app.database.db import Database
+from app.plugins.scheduler import parse_notification_command
+from app.services.notifications import NotificationSettingsService
+from app.services.scheduler import SchedulerService, SchedulerValidationError, parse_reminder_command
+
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(str(tmp_path / "scheduler.db"))
+    await database.connect()
+    yield database
+    await database.close()
+
+
+class FakeDispatcher:
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def send_user(self, user_id: str, message: str):
+        self.calls.append(("user", user_id, message))
+
+
+def test_parse_one_time_and_cron_reminders():
+    run_at, cron_expression, message = parse_reminder_command(
+        "/remind 2030-01-02 08:30 -- 记得提交周报"
+    )
+    assert run_at == datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    assert cron_expression is None
+    assert message == "记得提交周报"
+
+    run_at, cron_expression, message = parse_reminder_command("/remind cron:0 8 * * * -- 早上好")
+    assert run_at is None
+    assert cron_expression == "0 8 * * *"
+    assert message == "早上好"
+
+
+def test_parse_reminder_rejects_invalid_format():
+    with pytest.raises(SchedulerValidationError):
+        parse_reminder_command("/remind tomorrow -- 内容")
+
+
+def test_parse_report_notification_command():
+    assert parse_notification_command("/notify report on") == ("daily_report", True)
+
+
+async def test_notification_settings_default_off_and_can_be_enabled(db):
+    settings = NotificationSettingsService(db)
+
+    assert (await settings.get("user-1"))["reminder_notify"] is False
+    await settings.set("user-1", reminder_notify=True)
+    assert (await settings.get("user-1"))["reminder_notify"] is True
+
+
+async def test_create_and_run_one_time_reminder(db):
+    dispatcher = FakeDispatcher()
+    settings = NotificationSettingsService(db)
+    await settings.set("user-1", reminder_notify=True)
+    scheduler = SchedulerService(db, dispatcher, timezone_name="UTC")
+
+    task_id = await scheduler.create_reminder(
+        "user-1", "记得提交周报", datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    )
+    await scheduler.run_task(task_id)
+
+    assert dispatcher.calls == [("user", "user-1", "记得提交周报")]
+    row = await db.fetchone("SELECT enabled, last_run FROM scheduled_tasks WHERE id = ?", (task_id,))
+    assert row["enabled"] == 0
+    assert row["last_run"] is not None
+
+
+async def test_reminder_does_not_send_when_notifications_are_off(db):
+    dispatcher = FakeDispatcher()
+    scheduler = SchedulerService(db, dispatcher, timezone_name="UTC")
+    task_id = await scheduler.create_reminder(
+        "user-1", "不会推送", datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    )
+
+    await scheduler.run_task(task_id)
+
+    assert dispatcher.calls == []
+
+
+async def test_scheduler_starts_and_registers_persisted_task(db):
+    scheduler = SchedulerService(db, FakeDispatcher(), timezone_name="UTC")
+    task_id = await scheduler.create_reminder(
+        "user-1", "稍后提醒", datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    )
+
+    await scheduler.start()
+    try:
+        assert scheduler._scheduler.get_job(f"scheduled-task-{task_id}") is not None
+    finally:
+        await scheduler.stop()

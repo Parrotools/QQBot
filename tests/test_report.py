@@ -1,0 +1,76 @@
+from datetime import date
+
+import pytest
+
+from app.database.db import Database
+from app.services.github.models import GitHubSnapshot
+from app.services.notifications import NotificationSettingsService
+from app.services.report import ReportService
+
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(str(tmp_path / "report.db"))
+    await database.connect()
+    yield database
+    await database.close()
+
+
+class FakeDispatcher:
+    def __init__(self):
+        self.calls: list[tuple[str, str]] = []
+
+    async def send_user(self, user_id: str, message: str):
+        self.calls.append((str(user_id), message))
+
+
+def _snapshot(sha: str, stars: int) -> GitHubSnapshot:
+    return GitHubSnapshot(
+        stars=stars,
+        forks=0,
+        watchers=0,
+        commits_count=1,
+        latest_commit_sha=sha,
+        latest_commit_message=f"commit {sha}",
+        latest_commit_author="alice",
+        latest_commit_time="2030-01-02T08:00:00Z",
+        latest_release=None,
+        open_issues_count=0,
+    )
+
+
+async def test_daily_report_aggregates_github_tasks_and_important_memory(db):
+    repo_id = await db.insert_github_repository("user-1", "OpenAI", "openai-python", "https://github.com/OpenAI/openai-python")
+    old_id = await db.insert_github_snapshot(repo_id, _snapshot("old", 1).to_dict())
+    new_id = await db.insert_github_snapshot(repo_id, _snapshot("new", 2).to_dict())
+    await db.execute("UPDATE github_snapshots SET captured_at = ? WHERE id = ?", ("2030-01-01 23:00:00", old_id))
+    await db.execute("UPDATE github_snapshots SET captured_at = ? WHERE id = ?", ("2030-01-02 08:00:00", new_id))
+    memory_id = await db.insert_memory("user-1", "fact", "重要项目上线", 0.9)
+    await db.execute("UPDATE memories SET created_at = ?, updated_at = ? WHERE id = ?", ("2030-01-02 09:00:00", "2030-01-02 09:00:00", memory_id))
+    task_id = await db.create_scheduled_task(
+        "user-1", "reminder", {"message": "提交周报"}, None, "2030-01-02T10:00:00+00:00"
+    )
+    await db.execute("UPDATE scheduled_tasks SET created_at = ? WHERE id = ?", ("2030-01-02 09:30:00", task_id))
+
+    report = await ReportService(db, None, NotificationSettingsService(db), timezone_name="UTC").build_daily_report(
+        "user-1", date(2030, 1, 2)
+    )
+
+    assert "【每日总结 2030-01-02】" in report
+    assert "OpenAI/openai-python" in report
+    assert "commit new" in report
+    assert "提交周报" in report
+    assert "重要项目上线" in report
+
+
+async def test_scheduled_daily_report_respects_user_setting_and_sends(db):
+    dispatcher = FakeDispatcher()
+    notifications = NotificationSettingsService(db)
+    await notifications.set("user-1", daily_report=True)
+    service = ReportService(db, dispatcher, notifications, timezone_name="UTC")
+
+    await service.run_scheduled_report({"report_date": "2030-01-02"})
+
+    assert len(dispatcher.calls) == 1
+    assert dispatcher.calls[0][0] == "user-1"
+    assert await db.fetchone("SELECT COUNT(*) AS count FROM reports", ()) == {"count": 1}

@@ -6,6 +6,11 @@
 
 - 私聊 / 群聊 @ / 回复机器人续聊，群内普通消息不响应，未知命令给帮助而不是丢给 LLM
 - 多轮上下文会话（SQLite 持久化，群内成员默认独立上下文），`/clear` 清空
+- YAML 可配置人格（默认 Luna）
+- 用户显式维护的长期记忆，并在聊天时按重要度加载
+- 一次性与 cron 定时提醒（通知默认关闭）
+- GitHub 仓库监控：手动检查、commit/Star/Fork/Issue/Release 变化通知
+- 每日日报：汇总 GitHub 变化、任务/提醒和重要记忆，可手动查看
 - 网页总结：识别消息中的 URL，抓取正文，超长网页 Map-Reduce 分块总结；URL 结果进程内缓存（TTL 可配）；可选 Playwright 渲染兜底
 - 主动发送 / 多目标群发（仅管理员，带预览确认、TTL、限速、逐目标结果记录、旧待确认任务自动作废）
 - 安全：SSRF 逐跳校验、Prompt Injection 定界防御、LLM 无任何发送能力、API Key 不入日志
@@ -23,10 +28,11 @@ NapCatQQ                    ← 只负责 QQ 协议 ↔ OneBot 11 转换
    ▼
 NoneBot2 (FastAPI 驱动, ws://127.0.0.1:8080/onebot/v11/ws)
    │
-   ├─ app/plugins/        事件路由：ai_chat / web_summary / broadcast / admin
-   ├─ app/services/       业务层：LLM Gateway、网页管道、会话、MessageDispatcher
+   ├─ app/personality/    YAML 人格配置与加载
+   ├─ app/plugins/        事件路由：ai_chat / web_summary / memory / scheduler / github / report / broadcast / admin
+   ├─ app/services/       业务层：LLM Gateway、网页管道、会话、记忆、Scheduler、GitHub、Report、MessageDispatcher
    ├─ app/security/       权限、SSRF、Prompt Injection 防御
-   └─ app/database/       SQLite (aiosqlite)：sessions / messages / send_logs / pending_broadcasts
+   └─ app/database/       SQLite (aiosqlite)：sessions / messages / memories / scheduled_tasks / GitHub 快照 / send_logs
 ```
 
 ## 环境要求
@@ -94,6 +100,7 @@ cp .env.example .env      # Windows: copy .env.example .env
 | `ONEBOT_ACCESS_TOKEN` | 自定一个随机字符串，**必须与 NapCat 侧填的完全一致** |
 | `LLM_API_KEY` | 你的 LLM API Key |
 | `LLM_BASE_URL` / `LLM_MODEL` | 按厂商填，如 GLM：`https://open.bigmodel.cn/api/paas/v4` + `glm-4-flash` |
+| `PERSONALITY_FILE` | 人格 YAML 文件路径，默认 `app/personality/luna.yaml` |
 
 其余变量（限速、并发、网页大小上限、URL 缓存等）默认值即可运行，详见 `.env.example` 注释。
 
@@ -163,6 +170,8 @@ python bot.py
 | 主动发送（管理员私聊机器人） | `/broadcast user:123456 -- 你好` | 预览 → `/confirm` → 发送并汇报统计 |
 | 权限拒绝 | 非管理员发 `/broadcast ...` | "该命令仅管理员可用。" |
 | 重复 /broadcast | 管理员连续两次 /broadcast | 只保留最新一条待确认，旧的自动作废 |
+| GitHub 监控 | `/github add https://github.com/owner/repo` | 添加仓库后可手动检查或接收变化通知 |
+| 每日日报 | `/report` | 查看当天 GitHub、任务和重要记忆汇总 |
 
 主动发送也可以不经聊天窗口，用命令行（需 NapCat 开启 HTTP 服务端，环境变量 `ONEBOT_HTTP_URL` 指向其地址）：
 
@@ -185,10 +194,12 @@ ADMIN_QQ_IDS=111111,222222
 
 - **SSRF**：所有抓取先用 `ipaddress` 做 scheme + DNS 解析后 IP 校验（loopback / RFC1918 / link-local（含 169.254.169.254 云 metadata）/ 组播 / 保留段全部拒绝），重定向每一跳重新校验，最多 5 跳，只允许 http/https，响应体有大小上限。已知限制：校验与请求之间存在 DNS rebinding 的理论窗口，生产环境可加自建解析 pin。
 - **Prompt Injection**：网页内容永远包在 `<untrusted_web_content>` 定界符内送入 LLM，system prompt 明确声明其中任何指令无效；总结链路代码中不存在 `MessageDispatcher` 引用，网页内容在架构上不可能触发 QQ 发送。
-- **发送权限**：`MessageDispatcher` 是唯一发送出口，只能被管理员命令调用；LLM 无工具调用能力。
+- **发送权限**：`MessageDispatcher` 是唯一发送出口；主动发送只能来自管理员命令或用户已开启的定时通知任务，LLM 无工具调用能力。
 - **群发**：管理员专属 + 数量上限（默认 20）+ 限速（默认 1 条/秒）+ 预览确认（TTL 5 分钟、发起人本人可确认、仅可执行一次、重复下发自动作废旧任务）。
 - **敏感数据**：`.env` 已在 `.gitignore`；日志不输出 API Key，网页正文与发送内容截断后入库。
 - **优雅关闭**：Bot 停机时自动释放 LLM/抓取 HTTP 客户端与数据库连接。
+- **GitHub 监控**：使用 `GITHUB_CHECK_CRON` 周期检查；仅用户开启 `/notify github on` 后推送，GitHub Token 不写日志。
+- **日报**：使用 `DAILY_REPORT_CRON` 触发；仅用户开启 `/notify report on` 后发送，内容写入 `reports` 表。
 
 ## 11. 常见报错
 
@@ -241,7 +252,7 @@ WantedBy=multi-user.target
 
 ```bash
 pip install -e ".[dev]"
-pytest        # 91 个单测：URL / SSRF / 权限 / 解析器 / 会话 / 分块 / LLM / 缓存 / Dispatcher / 插件触发规则 / 注入防御
+pytest        # 单测：URL / SSRF / 权限 / 解析器 / 会话 / 记忆 / Scheduler / GitHub / 分块 / LLM / 缓存 / Dispatcher / 插件触发规则 / 注入防御
 ruff check app tests
 ```
 

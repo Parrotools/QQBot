@@ -17,7 +17,12 @@ CHAT_SYSTEM_PROMPT = load_prompt("chat.txt")
 # 已知命令白名单：私聊中其他 "/xxx" 一律视为未知命令，而不是丢给 LLM
 KNOWN_COMMANDS = {
     "/ai", "/clear", "/总结", "/summary", "/broadcast",
-    "/confirm", "/cancel", "/status", "/状态", "/help", "/帮助",
+    "/confirm", "/cancel", "/status", "/状态", "/help", "/帮助", "/remember", "/memories", "/memory",
+    "/remind", "/notify", "/report", "/日报",
+}
+_DELEGATED_COMMANDS = {
+    "/总结", "/summary", "/broadcast", "/confirm", "/cancel", "/status", "/状态",
+    "/remember", "/memories", "/memory", "/remind", "/notify", "/github", "/report", "/日报",
 }
 
 HELP_TEXT = (
@@ -26,6 +31,12 @@ HELP_TEXT = (
     "/clear —— 清空当前会话上下文\n"
     "/总结 <URL> —— 总结网页（/summary 同义）\n"
     "/help —— 显示本帮助\n"
+    "/remember [类型] -- 内容 —— 保存长期记忆\n"
+    "/memories —— 查看我的长期记忆\n"
+    "/remind 时间或 cron -- 内容 —— 创建提醒\n"
+    "/notify reminder|github on|off —— 开关提醒或 GitHub 通知\n"
+    "/github add|remove|list|check|info|watch —— GitHub 仓库监控\n"
+    "/report —— 查看今日汇总\n"
     "私聊直接发消息即可对话；群里 @我 或回复我也可以。\n"
     "管理员额外命令：/broadcast 目标列表 -- 消息、/confirm、/cancel、/status"
 )
@@ -61,6 +72,9 @@ async def _trigger(event: MessageEvent) -> bool:
     if _is_self(event):
         return False  # 过滤自己的消息，防循环
     text = event.message.extract_plain_text().strip()
+    first_token = text.split(maxsplit=1)[0].lower() if text else ""
+    if first_token in _DELEGATED_COMMANDS:
+        return False
     if isinstance(event, GroupMessageEvent):
         # 群聊：仅 @机器人 / 回复机器人（to_me）或 "/ai ..." 触发
         matched = (event.to_me and bool(text)) or text == "/ai" or text.startswith("/ai ")
@@ -100,7 +114,14 @@ async def _handle(event: MessageEvent):
         return
 
     history = await runtime.sessions.get_context(session_key)
-    messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}] + history + [{"role": "user", "content": text}]
+    messages = [
+        {"role": "system", "content": runtime.personality.build_system_prompt(CHAT_SYSTEM_PROMPT)},
+    ]
+    memory_context = await runtime.memory.context_prompt(str(event.user_id))
+    if memory_context:
+        messages.append({"role": "system", "content": memory_context})
+    messages.extend(history)
+    messages.append({"role": "user", "content": text})
 
     logger.info("LLM chat session=%s user=%s group=%s msg=%s",
                 session_key, event.user_id, getattr(event, "group_id", "-"), event.message_id)

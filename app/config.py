@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     llm_model: str = "glm-4-flash"
     llm_timeout: float = 60.0
 
+    # 人格
+    personality_file: str = "app/personality/luna.yaml"
+
     # 会话
     max_context_messages: int = 20
     group_shared_context: bool = False
@@ -45,6 +48,12 @@ class Settings(BaseSettings):
     # 并发
     max_concurrent_web_tasks: int = 3
     max_concurrent_llm_tasks: int = 5
+
+    # 定时任务
+    scheduler_timezone: str = "Asia/Shanghai"
+    github_token: str = ""
+    github_check_cron: str = "0 * * * *"
+    daily_report_cron: str = "0 23 * * *"
 
     # 数据 / 日志
     database_path: str = "data/bot.db"

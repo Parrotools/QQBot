@@ -10,6 +10,8 @@ from nonebot.adapters.onebot.v11.event import Sender
 
 from app.plugins import admin as admin_plugin
 from app.plugins import broadcast as broadcast_plugin
+from app.plugins import github as github_plugin
+from app.plugins import report as report_plugin
 from app.plugins import web_summary
 from app.plugins.ai_chat import _trigger as chat_trigger
 
@@ -142,6 +144,15 @@ async def test_confirm_and_cancel_rules():
     assert await broadcast_plugin._confirm_rule(_private_event("/confirm", mid=304)) is True
     assert await broadcast_plugin._confirm_rule(_private_event("/confirm now", mid=305)) is False
     assert await broadcast_plugin._cancel_rule(_private_event("/cancel", mid=306)) is True
+
+
+# ---------- GitHub / Report 触发规则 ----------
+
+async def test_deterministic_private_commands_are_delegated_from_chat():
+    assert await chat_trigger(_private_event("/github list", mid=350)) is False
+    assert await chat_trigger(_private_event("/report", mid=351)) is False
+    assert await github_plugin._github_rule(_private_event("/github list", mid=352)) is True
+    assert await report_plugin._report_rule(_private_event("/report", mid=353)) is True
 
 
 # ---------- admin 触发规则 ----------

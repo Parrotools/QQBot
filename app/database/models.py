@@ -1,4 +1,4 @@
-"""SQLite 表结构。第一版 4 张表：sessions / messages / send_logs / pending_broadcasts。"""
+"""SQLite 表结构：会话、记忆、任务、GitHub 监控、通知与审计记录。"""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -15,6 +15,87 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_key, id);
+
+CREATE TABLE IF NOT EXISTS memories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    type        TEXT NOT NULL CHECK(type IN ('preference', 'project', 'fact', 'github', 'schedule')),
+    content     TEXT NOT NULL,
+    importance  REAL NOT NULL CHECK(importance >= 0 AND importance <= 1),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_memories_user_context
+    ON memories(user_id, importance DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id        TEXT NOT NULL,
+    task_type       TEXT NOT NULL,
+    payload         TEXT NOT NULL,
+    cron_expression TEXT,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    last_run        TEXT,
+    next_run        TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled_next
+    ON scheduled_tasks(enabled, next_run);
+
+CREATE TABLE IF NOT EXISTS notification_settings (
+    user_id         TEXT PRIMARY KEY,
+    github_notify   INTEGER NOT NULL DEFAULT 0,
+    daily_report    INTEGER NOT NULL DEFAULT 0,
+    reminder_notify INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS github_repositories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id    TEXT NOT NULL,
+    repo_owner  TEXT NOT NULL,
+    repo_name   TEXT NOT NULL,
+    repo_url    TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(owner_id, repo_owner, repo_name)
+);
+CREATE INDEX IF NOT EXISTS idx_github_repositories_owner ON github_repositories(owner_id);
+
+CREATE TABLE IF NOT EXISTS github_snapshots (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id                INTEGER NOT NULL,
+    stars                  INTEGER NOT NULL,
+    forks                  INTEGER NOT NULL,
+    watchers               INTEGER NOT NULL,
+    commits_count          INTEGER NOT NULL,
+    latest_commit_sha      TEXT NOT NULL,
+    latest_commit_message  TEXT NOT NULL,
+    latest_commit_author   TEXT NOT NULL,
+    latest_commit_time     TEXT NOT NULL,
+    latest_release         TEXT,
+    open_issues_count      INTEGER NOT NULL,
+    captured_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_github_snapshots_repo ON github_snapshots(repo_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS github_notifications (
+    repo_id     INTEGER NOT NULL,
+    target_type TEXT NOT NULL CHECK(target_type IN ('user', 'group')),
+    target_id   TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(repo_id, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id     TEXT NOT NULL,
+    report_type  TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end   TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(owner_id, report_type, period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_reports_owner_period ON reports(owner_id, period_start DESC);
 
 CREATE TABLE IF NOT EXISTS send_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

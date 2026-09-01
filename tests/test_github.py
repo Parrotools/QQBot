@@ -1,0 +1,210 @@
+import httpx
+import pytest
+
+from app.database.db import Database
+from app.services.github.client import GitHubClient, GitHubRateLimitError, parse_snapshot_payload
+from app.services.github.tracker import (
+    GitHubTracker,
+    GitHubTrackerError,
+    compare_snapshots,
+    parse_repo_url,
+)
+from app.services.notifications import NotificationSettingsService
+
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(str(tmp_path / "github.db"))
+    await database.connect()
+    yield database
+    await database.close()
+
+
+def test_parse_github_repository_url():
+    ref = parse_repo_url("https://github.com/OpenAI/openai-python/")
+
+    assert ref.owner == "OpenAI"
+    assert ref.name == "openai-python"
+    assert ref.url == "https://github.com/OpenAI/openai-python"
+
+
+def test_parse_repo_url_rejects_non_github_url():
+    with pytest.raises(GitHubTrackerError):
+        parse_repo_url("https://example.com/OpenAI/openai-python")
+
+
+def test_parse_github_api_payload():
+    snapshot = parse_snapshot_payload(
+        {
+            "stargazers_count": 10,
+            "forks_count": 2,
+            "subscribers_count": 3,
+            "open_issues_count": 4,
+        },
+        {
+            "sha": "abc123",
+            "commit": {
+                "message": "Improve kernel",
+                "author": {"name": "Alice", "date": "2030-01-02T08:30:00Z"},
+            },
+            "author": {"login": "alice"},
+        },
+        {"tag_name": "v1.2.0"},
+        commits_count=42,
+    )
+
+    assert snapshot.stars == 10
+    assert snapshot.forks == 2
+    assert snapshot.watchers == 3
+    assert snapshot.commits_count == 42
+    assert snapshot.latest_commit_sha == "abc123"
+    assert snapshot.latest_commit_message == "Improve kernel"
+    assert snapshot.latest_commit_author == "alice"
+    assert snapshot.latest_release == "v1.2.0"
+
+
+def test_compare_snapshots_detects_commit_and_growth():
+    old = {
+        "stars": 10,
+        "forks": 2,
+        "watchers": 3,
+        "commits_count": 40,
+        "latest_commit_sha": "old",
+        "latest_commit_message": "Old commit",
+        "latest_commit_author": "alice",
+        "latest_commit_time": "2030-01-01T00:00:00Z",
+        "latest_release": "v1.1.0",
+        "open_issues_count": 1,
+    }
+    new = {
+        **old,
+        "stars": 12,
+        "forks": 3,
+        "commits_count": 42,
+        "latest_commit_sha": "new",
+        "latest_commit_message": "New commit",
+        "latest_release": "v1.2.0",
+        "open_issues_count": 2,
+    }
+
+    changes = compare_snapshots(old, new)
+
+    assert {change["type"] for change in changes} == {"commit", "stars", "forks", "release", "issues"}
+
+
+async def test_github_client_reports_rate_limit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"X-RateLimit-Remaining": "0"},
+            json={"message": "API rate limit exceeded"},
+        )
+
+    client = GitHubClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(GitHubRateLimitError):
+            await client.get_repository("OpenAI", "openai-python")
+    finally:
+        await client.aclose()
+
+
+class FakeGitHubClient:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+    async def fetch_snapshot(self, ref):
+        return self.snapshot
+
+
+def _snapshot(sha: str, stars: int = 1):
+    from app.services.github.models import GitHubSnapshot
+
+    return GitHubSnapshot(
+        stars=stars,
+        forks=0,
+        watchers=0,
+        commits_count=1,
+        latest_commit_sha=sha,
+        latest_commit_message="message",
+        latest_commit_author="author",
+        latest_commit_time="2030-01-01T00:00:00Z",
+        latest_release=None,
+        open_issues_count=0,
+    )
+
+
+async def test_tracker_isolates_repositories_and_records_snapshots(db):
+    client = FakeGitHubClient(_snapshot("first"))
+    tracker = GitHubTracker(db, client)
+
+    user_repo = await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+    await tracker.add_repository("user-2", "https://github.com/OpenAI/openai-python")
+    first_check = await tracker.check("user-1", user_repo["repo_url"])
+
+    client.snapshot = _snapshot("second", stars=2)
+    second_check = await tracker.check("user-1", user_repo["repo_url"])
+
+    assert len(await tracker.list_repositories("user-1")) == 1
+    assert first_check["changes"] == []
+    assert {change["type"] for change in second_check["changes"]} == {"commit", "stars"}
+    assert await db.fetchone("SELECT COUNT(*) AS count FROM github_snapshots", ()) == {"count": 2}
+
+
+async def test_tracker_prevents_watching_another_users_repository(db):
+    tracker = GitHubTracker(db, FakeGitHubClient(_snapshot("first")))
+    await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+
+    with pytest.raises(GitHubTrackerError):
+        await tracker.watch("user-2", "https://github.com/OpenAI/openai-python", "group:123")
+
+
+async def test_remove_repository_cleans_snapshots_and_notifications(db):
+    tracker = GitHubTracker(db, FakeGitHubClient(_snapshot("first")))
+    repo = await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+    await tracker.watch("user-1", repo["repo_url"], "user:999")
+    await tracker.check("user-1", repo["repo_url"])
+
+    assert await tracker.remove_repository("user-1", repo["repo_url"])
+    assert await db.fetchone("SELECT COUNT(*) AS count FROM github_snapshots", ()) == {"count": 0}
+    assert await db.fetchone("SELECT COUNT(*) AS count FROM github_notifications", ()) == {"count": 0}
+
+
+class FakeDispatcher:
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def send_user(self, user_id: str, message: str):
+        self.calls.append(("user", user_id, message))
+
+    async def send_group(self, group_id: str, message: str):
+        self.calls.append(("group", group_id, message))
+
+
+async def test_scheduled_check_sends_only_when_github_notifications_are_enabled(db):
+    client = FakeGitHubClient(_snapshot("first"))
+    dispatcher = FakeDispatcher()
+    notifications = NotificationSettingsService(db)
+    tracker = GitHubTracker(db, client, dispatcher, notifications)
+    repo = await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+    await tracker.watch("user-1", repo["repo_url"], "user:999")
+    await tracker.check("user-1", repo["repo_url"])
+
+    client.snapshot = _snapshot("second", stars=2)
+    await tracker.run_scheduled_check({})
+    assert dispatcher.calls == []
+
+    await notifications.set("user-1", github_notify=True)
+    client.snapshot = _snapshot("third", stars=3)
+    await tracker.run_scheduled_check({})
+
+    assert dispatcher.calls and dispatcher.calls[0][0:2] == ("user", "999")
+    assert "OpenAI/openai-python" in dispatcher.calls[0][2]
+
+
+def test_parse_github_command():
+    from app.plugins.github import parse_github_command
+
+    assert parse_github_command("/github add https://github.com/OpenAI/openai-python") == (
+        "add",
+        ["https://github.com/OpenAI/openai-python"],
+    )

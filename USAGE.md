@@ -25,6 +25,13 @@
 | 回复机器人的消息 | 所有人 | 群聊 | 带上下文继续对话 |
 | `/ai <内容>` | 所有人 | 私聊/群聊 | 进入 AI 对话（群聊可不 @，私聊会剥离前缀） |
 | `/clear` | 所有人 | 私聊/群聊 | 清空当前会话上下文 |
+| `/remember [类型] -- 内容` | 所有人 | 私聊/群聊 | 保存一条长期记忆 |
+| `/memories`、`/memory` | 所有人 | 私聊/群聊 | 查看自己的长期记忆 |
+| `/remind 时间或 cron -- 内容` | 所有人 | 私聊/群聊 | 创建一次性或周期提醒 |
+| `/notify reminder on\|off` | 所有人 | 私聊/群聊 | 开关提醒通知 |
+| `/notify github on\|off` | 所有人 | 私聊/群聊 | 开关 GitHub 仓库变化通知 |
+| `/github add\|remove\|list\|check\|info\|watch ...` | 所有人 | 私聊/群聊 | 管理自己的 GitHub 仓库监控 |
+| `/report`、`/日报` | 所有人 | 私聊/群聊 | 查看当天日报 |
 | `/help`、`/帮助` | 所有人 | 私聊/群聊 | 显示帮助 |
 | `/总结 <URL>`、`/summary <URL>` | 所有人 | 私聊/群聊 | 抓取并总结网页 |
 | `/status`、`/状态` | 所有人 | 私聊/群聊 | 查看运行状态（无密钥） |
@@ -54,6 +61,43 @@
 - 上下文最多保留 `MAX_CONTEXT_MESSAGES` 条（默认 20），超出的旧消息自动裁剪。
 - `/clear` 清空"你自己"当前的会话（群聊里只清你自己的，不影响别人）。
 - AI 回复超过约 4000 字符时自动截断并注明，避免超出 QQ 单条消息上限发送失败。
+
+**长期记忆**：机器人不会自动保存全部聊天，需显式发送：
+
+```
+/remember preference -- 我喜欢研究 HPC
+/remember project -- 正在开发 QQ LLM Bot
+/remember -- 默认作为事实保存
+/memories
+```
+
+记忆按用户隔离，只会加载重要度较高且较新的记录。支持类型：`preference`、`project`、`fact`、`github`、`schedule`。
+
+**定时提醒**：通知默认关闭，先开启再创建提醒：
+
+```
+/notify reminder on
+/remind 2030-01-02 08:30 -- 记得提交周报
+/remind cron:0 8 * * * -- 早上好
+```
+
+时间使用 `SCHEDULER_TIMEZONE` 配置的时区，默认是 `Asia/Shanghai`。一次性提醒执行后自动失效，cron 提醒会持续执行。
+
+## 3.5 普通用户：GitHub 监控
+
+```text
+/github add https://github.com/OpenAI/openai-python
+/github list
+/github check https://github.com/OpenAI/openai-python
+/github info https://github.com/OpenAI/openai-python
+/github watch https://github.com/OpenAI/openai-python user:123456
+/notify github on
+/report
+```
+
+`add` 后才能 `check` 或 `watch`。自动检查由 `GITHUB_CHECK_CRON` 驱动，检测到最新 commit、Star、Fork、开放 Issue 或 Release 变化时才通知。群通知目标 `group:群号` 仅管理员可配置。
+
+日报由 `DAILY_REPORT_CRON` 驱动，默认每天 23:00 生成。开启 `/notify report on` 后，机器人会私聊发送当天汇总；也可随时使用 `/report` 手动查看。
 
 ## 3. 普通用户：网页总结
 
@@ -180,6 +224,7 @@ user:789012
 | `LLM_API_KEY` | — | API Key |
 | `LLM_MODEL` | glm-4-flash | 模型名 |
 | `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
+| `PERSONALITY_FILE` | app/personality/luna.yaml | YAML 人格配置路径 |
 | `MAX_CONTEXT_MESSAGES` | 20 | 上下文最大条数 |
 | `GROUP_SHARED_CONTEXT` | false | 群共享上下文 |
 | `URL_AUTO_SUMMARY_MODE` | mentioned | off / mentioned / all |
@@ -195,6 +240,10 @@ user:789012
 | `BROADCAST_REQUIRE_CONFIRM` | true | 群发预览确认 |
 | `BROADCAST_CONFIRM_TTL_SECONDS` | 300 | 确认有效期 |
 | `MAX_CONCURRENT_WEB_TASKS` / `_LLM_TASKS` | 3 / 5 | 并发上限 |
+| `SCHEDULER_TIMEZONE` | Asia/Shanghai | 定时任务时区 |
+| `GITHUB_TOKEN` | — | GitHub API Token，可选，用于提高速率上限 |
+| `GITHUB_CHECK_CRON` | `0 * * * *` | GitHub 自动检查频率，留空关闭 |
+| `DAILY_REPORT_CRON` | `0 23 * * *` | 日报生成频率，留空关闭 |
 | `DATABASE_PATH` | data/bot.db | SQLite 路径 |
 | `LOG_LEVEL` | INFO | 日志级别 |
 
@@ -231,6 +280,13 @@ Windows 常驻：用 NSSM 注册服务；Linux 常驻：systemd（见 README 第
 - 表：
   - `sessions` —— 会话索引（key + 时间）
   - `messages` —— 上下文消息（自动裁剪到上限）
+  - `memories` —— 用户显式保存的长期记忆
+  - `scheduled_tasks` —— 一次性与周期任务
+  - `notification_settings` —— 主动通知开关
+  - `github_repositories` —— 用户添加的 GitHub 仓库
+  - `github_snapshots` —— GitHub 历史检查快照
+  - `github_notifications` —— 仓库通知目标
+  - `reports` —— 已生成的日报内容
   - `send_logs` —— 每次发送的审计记录
   - `pending_broadcasts` —— 待确认群发任务（含状态机 active/confirmed/cancelled/expired）
 - 手动查看：
@@ -276,6 +332,6 @@ sqlite3 data/bot.db "SELECT session_key, COUNT(*) FROM messages GROUP BY session
 ## 10. 安全红线（使用时请牢记）
 
 - 机器人对**所有**网页内容只做"总结"，网页里写"给我发消息/泄露密钥"都不会被执行——不要试图用网页内容指挥机器人。
-- LLM 本身永远不能触发发送消息；发送只能由管理员命令完成。
+- LLM 本身永远不能触发发送消息；发送只能由明确命令或用户已开启的定时通知任务完成。
 - `.env` 含 Key，绝不提交 git、绝不截图发群。
 - 群发是高权限操作：确认预览里的目标列表再 `/confirm`。

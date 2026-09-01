@@ -13,6 +13,8 @@ dependencies = [
     "lxml>=5.0.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",
+    "PyYAML>=6.0",
+    "APScheduler>=3.10.4,<4",
 ]
 
 [project.optional-dependencies]

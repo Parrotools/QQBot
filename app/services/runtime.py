@@ -10,10 +10,17 @@ from dataclasses import dataclass
 
 from app.config import Settings, get_settings
 from app.database.db import Database
+from app.personality.manager import PersonalityManager
 from app.security.permissions import PermissionService
+from app.services.github.client import GitHubClient
+from app.services.github.tracker import GitHubTracker
 from app.services.llm.base import LLMProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
+from app.services.memory import MemoryService
+from app.services.notifications import NotificationSettingsService
 from app.services.qq.dispatcher import MessageDispatcher
+from app.services.report import ReportService
+from app.services.scheduler import SchedulerService
 from app.services.session.manager import SessionManager
 from app.services.web.extractor import ExtractionError  # noqa: F401  便于插件统一导入
 from app.services.web.fetcher import PlaywrightFetcher, WebFetcher
@@ -24,6 +31,13 @@ from app.services.web.summarizer import WebSummarizer
 class Runtime:
     settings: Settings
     db: Database
+    personality: PersonalityManager
+    memory: MemoryService
+    notifications: NotificationSettingsService
+    scheduler: SchedulerService
+    github_client: GitHubClient
+    github: GitHubTracker
+    report: ReportService
     sessions: SessionManager
     llm: LLMProvider
     dispatcher: MessageDispatcher
@@ -49,6 +63,7 @@ async def init_runtime() -> Runtime:
     )
     db = Database(settings.database_path)
     await db.connect()
+    personality = PersonalityManager(settings.personality_file)
 
     llm = OpenAICompatibleProvider(
         base_url=settings.llm_base_url,
@@ -58,6 +73,19 @@ async def init_runtime() -> Runtime:
         max_concurrency=settings.max_concurrent_llm_tasks,
     )
     dispatcher = MessageDispatcher(db, rate_limit_per_second=settings.send_rate_limit_per_second)
+    notifications = NotificationSettingsService(db)
+    github_client = GitHubClient(token=settings.github_token)
+    github = GitHubTracker(db, github_client, dispatcher, notifications)
+    report = ReportService(db, dispatcher, notifications, timezone_name=settings.scheduler_timezone)
+    scheduler = SchedulerService(db, dispatcher, timezone_name=settings.scheduler_timezone)
+    scheduler.register_handler("github_check", github.run_scheduled_check)
+    scheduler.register_handler("daily_report", report.run_scheduled_report)
+    for task_type, cron_expression in (
+        ("github_check", settings.github_check_cron),
+        ("daily_report", settings.daily_report_cron),
+    ):
+        if cron_expression and await db.fetch_scheduled_task_by_owner_type("__system__", task_type) is None:
+            await scheduler.create_task("__system__", task_type, {}, cron_expression=cron_expression)
     fetcher = WebFetcher(
         max_bytes=settings.max_webpage_bytes,
         connect_timeout=settings.web_fetch_timeout_connect,
@@ -78,6 +106,13 @@ async def init_runtime() -> Runtime:
     _runtime = Runtime(
         settings=settings,
         db=db,
+        personality=personality,
+        memory=MemoryService(db),
+        notifications=notifications,
+        scheduler=scheduler,
+        github_client=github_client,
+        github=github,
+        report=report,
         sessions=SessionManager(db, settings.max_context_messages),
         llm=llm,
         dispatcher=dispatcher,
@@ -87,6 +122,7 @@ async def init_runtime() -> Runtime:
         summarizer=summarizer,
         web_semaphore=asyncio.Semaphore(max(1, settings.max_concurrent_web_tasks)),
     )
+    await scheduler.start()
     return _runtime
 
 
@@ -104,9 +140,17 @@ async def close_runtime() -> None:
     rt, _runtime = _runtime, None
     logger = logging.getLogger(__name__)
     try:
+        await rt.scheduler.stop()
+    except Exception:
+        logger.exception("关闭 Scheduler 失败")
+    try:
         await rt.llm.aclose()
     except Exception:
         logger.exception("关闭 LLM 客户端失败")
+    try:
+        await rt.github_client.aclose()
+    except Exception:
+        logger.exception("关闭 GitHub 客户端失败")
     try:
         await rt.fetcher.aclose()
     except Exception:
