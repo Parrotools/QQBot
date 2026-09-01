@@ -1,0 +1,58 @@
+"""pending_broadcast 生命周期测试：TTL 过期、管理员隔离、防重复执行。"""
+
+import pytest
+
+from app.database.db import Database
+
+
+@pytest.fixture
+async def db(tmp_path):
+    d = Database(str(tmp_path / "t.db"))
+    await d.connect()
+    yield d
+    await d.close()
+
+
+async def test_create_and_get_active(db):
+    pid = await db.create_pending_broadcast("admin1", [{"type": "user", "id": "123"}], "hello", ttl_seconds=300)
+    pending = await db.get_active_pending("admin1")
+    assert pending is not None and pending["id"] == pid
+    assert pending["targets"] == [{"type": "user", "id": "123"}]
+    assert pending["content"] == "hello"
+
+
+async def test_admin_isolation(db):
+    await db.create_pending_broadcast("admin1", [], "hello", ttl_seconds=300)
+    assert await db.get_active_pending("admin2") is None
+
+
+async def test_ttl_expiry(db):
+    await db.create_pending_broadcast("admin1", [], "hello", ttl_seconds=-1)  # 立即过期
+    assert await db.get_active_pending("admin1") is None
+    # 过期后状态被标记
+    rows = await db.fetchall("SELECT status FROM pending_broadcasts")
+    assert rows[0]["status"] == "expired"
+
+
+async def test_finish_prevents_double_execute(db):
+    pid = await db.create_pending_broadcast("admin1", [], "hello", ttl_seconds=300)
+    assert await db.finish_pending(pid, "confirmed") is True
+    # 第二次确认失败（防重复执行）
+    assert await db.finish_pending(pid, "confirmed") is False
+    assert await db.get_active_pending("admin1") is None
+
+
+async def test_new_pending_cancels_old(db):
+    """同一管理员重复 /broadcast 时，旧的待确认任务应被自动作废。"""
+    await db.create_pending_broadcast("admin1", [], "first", ttl_seconds=300)
+    await db.create_pending_broadcast("admin1", [], "second", ttl_seconds=300)
+    pending = await db.get_active_pending("admin1")
+    assert pending is not None and pending["content"] == "second"
+    rows = await db.fetchall("SELECT status FROM pending_broadcasts ORDER BY id")
+    assert [r["status"] for r in rows] == ["cancelled", "active"]
+
+
+async def test_cancel(db):
+    pid = await db.create_pending_broadcast("admin1", [], "hello", ttl_seconds=300)
+    assert await db.finish_pending(pid, "cancelled") is True
+    assert await db.get_active_pending("admin1") is None

@@ -1,0 +1,147 @@
+"""broadcast 插件：管理员多目标群发 + 确认机制 + 限速 + 逐目标结果记录。
+
+流程：
+    /broadcast user:123,group:456 -- 消息
+    -> （默认）返回预览，等待该管理员 /confirm（TTL 内）或 /cancel
+    -> 确认后逐目标发送，最后汇报成功/失败统计
+"""
+
+import math
+
+from nonebot import logger, on_message
+from nonebot.adapters.onebot.v11 import MessageEvent
+from nonebot.rule import Rule
+
+from app.plugins.ai_chat import claim_message_id
+from app.services.qq.broadcast_parser import BroadcastFormatError, parse_broadcast_command
+from app.services.runtime import get_runtime
+
+_BROADCAST = "/broadcast"
+_CONFIRM = "/confirm"
+_CANCEL = "/cancel"
+
+
+async def _broadcast_rule(event: MessageEvent) -> bool:
+    if str(event.user_id) == str(event.self_id):
+        return False
+    text = event.message.extract_plain_text().strip()
+    if text.lower().startswith(_BROADCAST):
+        return claim_message_id(str(event.message_id))
+    return False
+
+
+async def _confirm_rule(event: MessageEvent) -> bool:
+    if str(event.user_id) == str(event.self_id):
+        return False
+    if event.message.extract_plain_text().strip() == _CONFIRM:
+        return claim_message_id(str(event.message_id))
+    return False
+
+
+async def _cancel_rule(event: MessageEvent) -> bool:
+    if str(event.user_id) == str(event.self_id):
+        return False
+    if event.message.extract_plain_text().strip() == _CANCEL:
+        return claim_message_id(str(event.message_id))
+    return False
+
+
+broadcast_matcher = on_message(rule=Rule(_broadcast_rule), priority=5, block=True)
+confirm_matcher = on_message(rule=Rule(_confirm_rule), priority=5, block=True)
+cancel_matcher = on_message(rule=Rule(_cancel_rule), priority=5, block=True)
+
+
+@broadcast_matcher.handle()
+async def _handle_broadcast(event: MessageEvent):
+    runtime = get_runtime()
+    sender_id = str(event.user_id)
+
+    if not runtime.permission.is_admin(sender_id):
+        await broadcast_matcher.send("该命令仅管理员可用。")
+        return
+
+    text = event.message.extract_plain_text().strip()
+    try:
+        targets, message = parse_broadcast_command(text)
+    except BroadcastFormatError as e:
+        await broadcast_matcher.send(f"格式错误：{e}")
+        return
+
+    if len(targets) > runtime.settings.max_broadcast_recipients:
+        await broadcast_matcher.send(
+            f"目标数量 {len(targets)} 超过上限 {runtime.settings.max_broadcast_recipients}，已拒绝。"
+        )
+        return
+
+    target_lines = "\n".join(f"- {t.display()}" for t in targets)
+    minutes = max(1, math.ceil(runtime.settings.broadcast_confirm_ttl_seconds / 60))
+    preview = (
+        f"准备发送：\n目标：\n{target_lines}\n\n"
+        f"消息：\n{message}\n\n总计 {len(targets)} 个目标。\n"
+        f"请在 {minutes} 分钟内输入 /confirm 继续，或 /cancel 取消。"
+    )
+
+    if runtime.settings.broadcast_require_confirm:
+        pending_id = await runtime.db.create_pending_broadcast(
+            admin_id=sender_id,
+            targets=[t.to_dict() for t in targets],
+            content=message,
+            ttl_seconds=runtime.settings.broadcast_confirm_ttl_seconds,
+        )
+        logger.info("broadcast 预览创建 pending_id=%s admin=%s targets=%d", pending_id, sender_id, len(targets))
+        await broadcast_matcher.send(preview)
+        return
+
+    report = await runtime.dispatcher.broadcast(targets, message)
+    await broadcast_matcher.send(report.summary_text())
+
+
+@confirm_matcher.handle()
+async def _handle_confirm(event: MessageEvent):
+    runtime = get_runtime()
+    sender_id = str(event.user_id)
+
+    if not runtime.permission.is_admin(sender_id):
+        await confirm_matcher.send("该命令仅管理员可用。")
+        return
+
+    pending = await runtime.db.get_active_pending(sender_id)
+    if pending is None:
+        await confirm_matcher.send("没有待确认的群发任务（可能已过期或不存在）。")
+        return
+
+    # 防重复执行：只有成功把状态改为 confirmed 的一方才能发送
+    if not await runtime.db.finish_pending(pending["id"], "confirmed"):
+        await confirm_matcher.send("该任务已被处理。")
+        return
+
+    from app.services.qq.broadcast_parser import parse_targets
+
+    try:
+        targets = parse_targets(",".join(f"{t['type']}:{t['id']}" for t in pending["targets"]))
+    except BroadcastFormatError:
+        logger.error("pending_broadcast %s 目标数据损坏", pending["id"])
+        await confirm_matcher.send("任务数据异常，已放弃发送。")
+        return
+
+    logger.info("broadcast 执行 pending_id=%s admin=%s targets=%d", pending["id"], sender_id, len(targets))
+    report = await runtime.dispatcher.broadcast(targets, pending["content"])
+    await confirm_matcher.send(report.summary_text())
+
+
+@cancel_matcher.handle()
+async def _handle_cancel(event: MessageEvent):
+    runtime = get_runtime()
+    sender_id = str(event.user_id)
+
+    if not runtime.permission.is_admin(sender_id):
+        await cancel_matcher.send("该命令仅管理员可用。")
+        return
+
+    pending = await runtime.db.get_active_pending(sender_id)
+    if pending is None:
+        await cancel_matcher.send("没有待取消的群发任务。")
+        return
+    await runtime.db.finish_pending(pending["id"], "cancelled")
+    logger.info("broadcast 取消 pending_id=%s admin=%s", pending["id"], sender_id)
+    await cancel_matcher.send("已取消。")

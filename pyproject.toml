@@ -1,0 +1,41 @@
+[project]
+name = "qq-llm-bot"
+version = "0.1.0"
+description = "QQ LLM bot based on NapCatQQ + OneBot 11 + NoneBot2, with web summarization and permission-controlled message sending."
+requires-python = ">=3.11"
+dependencies = [
+    "nonebot2[fastapi]>=2.3.0",
+    "nonebot-adapter-onebot>=2.4.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+    "trafilatura>=1.8.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+playwright = [
+    "playwright>=1.44.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

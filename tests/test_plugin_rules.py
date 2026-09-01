@@ -1,0 +1,164 @@
+"""插件触发规则集成测试：用真实 OneBot v11 事件模型验证触发/去重逻辑。
+
+覆盖验收场景 2/3/5/7 的"触发面"部分（权限与发送逻辑在服务层测试中覆盖）。
+"""
+
+from types import SimpleNamespace
+
+from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment, PrivateMessageEvent
+from nonebot.adapters.onebot.v11.event import Sender
+
+from app.plugins import admin as admin_plugin
+from app.plugins import broadcast as broadcast_plugin
+from app.plugins import web_summary
+from app.plugins.ai_chat import _trigger as chat_trigger
+
+SELF_ID = "10000"
+
+
+def _group_event(text: str, *, at: bool = False, to_me: bool | None = None, user: int = 20000,
+                 mid: int = 1) -> GroupMessageEvent:
+    msg = Message()
+    if at:
+        msg.append(MessageSegment.at(SELF_ID))
+    msg.append(text)
+    return GroupMessageEvent(
+        time=0, self_id=SELF_ID, post_type="message", sub_type="normal",
+        user_id=user, message_type="group", message_id=mid, group_id=30000,
+        message=msg, raw_message=str(msg), font=0,
+        sender=Sender(user_id=user, nickname="u"),
+        to_me=at if to_me is None else to_me,
+    )
+
+
+def _private_event(text: str, *, user: int = 20000, mid: int = 1) -> PrivateMessageEvent:
+    return PrivateMessageEvent(
+        time=0, self_id=SELF_ID, post_type="message", sub_type="friend",
+        user_id=user, message_type="private", message_id=mid,
+        message=Message(text), raw_message=text, font=0,
+        sender=Sender(user_id=user, nickname="u"),
+    )
+
+
+# ---------- ai_chat 触发规则 ----------
+
+async def test_chat_private_always_triggers():
+    assert await chat_trigger(_private_event("你好，你是谁", mid=101)) is True
+
+
+async def test_chat_group_at_triggers():
+    ev = _group_event(" 解释一下 Dijkstra", at=True, mid=102)
+    assert await chat_trigger(ev) is True
+
+
+async def test_chat_group_reply_triggers():
+    ev = _group_event("那时间复杂度呢", to_me=True, mid=103)
+    assert await chat_trigger(ev) is True
+
+
+async def test_chat_group_plain_message_ignored():
+    """场景 3：群普通聊天不响应。"""
+    assert await chat_trigger(_group_event("今天晚上吃什么", mid=104)) is False
+
+
+async def test_chat_group_ai_command_without_at():
+    assert await chat_trigger(_group_event("/ai 写个俳句", mid=105)) is True
+
+
+async def test_chat_self_message_ignored():
+    ev = _private_event("自言自语", user=int(SELF_ID), mid=106)
+    assert await chat_trigger(ev) is False
+
+
+async def test_chat_message_id_dedup():
+    ev = _private_event("重复投递的消息", mid=107)
+    assert await chat_trigger(ev) is True
+    assert await chat_trigger(ev) is False  # 同一 message_id 第二次不处理
+
+
+async def test_chat_ai_prefix_variants():
+    assert await chat_trigger(_group_event("/airplane 模型", mid=108)) is False  # 不误匹配
+    assert await chat_trigger(_group_event("/ai", mid=109)) is True
+
+
+# ---------- web_summary 触发规则 ----------
+
+def _patch_mode(monkeypatch, mode: str) -> None:
+    stub = SimpleNamespace(settings=SimpleNamespace(url_auto_summary_mode=mode))
+    monkeypatch.setattr(web_summary, "get_runtime", lambda: stub)
+
+
+async def test_summary_command_always_triggers(monkeypatch):
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(_private_event("/总结", mid=201)) is True  # 无 URL 也接住
+    assert await web_summary._trigger(_group_event("/总结 https://example.com/a", at=True, mid=202)) is True
+
+
+async def test_summary_private_url_auto(monkeypatch):
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(_private_event("看看这个 https://example.com/a", mid=203)) is True
+
+
+async def test_summary_group_url_requires_at(monkeypatch):
+    """场景 5：@机器人 + URL 自动总结；未 @ 不自动。"""
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(_group_event(" 这篇文章主要说什么 https://example.com/a", at=True, mid=204)) is True
+    assert await web_summary._trigger(_group_event("看看 https://example.com/a", mid=205)) is False
+
+
+async def test_summary_mode_all(monkeypatch):
+    _patch_mode(monkeypatch, "all")
+    assert await web_summary._trigger(_group_event("看看 https://example.com/a", mid=206)) is True
+
+
+async def test_summary_mode_off(monkeypatch):
+    _patch_mode(monkeypatch, "off")
+    assert await web_summary._trigger(_private_event("看看这个 https://example.com/a", mid=207)) is False
+
+
+async def test_summary_no_url_private(monkeypatch):
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(_private_event("你好", mid=208)) is False
+
+
+async def test_summary_self_ignored(monkeypatch):
+    _patch_mode(monkeypatch, "all")
+    assert await web_summary._trigger(_private_event("https://example.com", user=int(SELF_ID), mid=209)) is False
+
+
+# ---------- broadcast 触发规则 ----------
+
+async def test_broadcast_rule_matches_command():
+    ev = _private_event("/broadcast user:123 -- hello", mid=301)
+    assert await broadcast_plugin._broadcast_rule(ev) is True
+
+
+async def test_broadcast_rule_rejects_other_text():
+    assert await broadcast_plugin._broadcast_rule(_private_event("broadcast user:123", mid=302)) is False
+    assert await broadcast_plugin._broadcast_rule(_private_event("/confirm", mid=303)) is False
+
+
+async def test_confirm_and_cancel_rules():
+    assert await broadcast_plugin._confirm_rule(_private_event("/confirm", mid=304)) is True
+    assert await broadcast_plugin._confirm_rule(_private_event("/confirm now", mid=305)) is False
+    assert await broadcast_plugin._cancel_rule(_private_event("/cancel", mid=306)) is True
+
+
+# ---------- admin 触发规则 ----------
+
+async def test_status_rule():
+    assert await admin_plugin._status_trigger(_private_event("/status", mid=401)) is True
+    assert await admin_plugin._status_trigger(_private_event("/状态", mid=402)) is True
+    assert await admin_plugin._status_trigger(_private_event("status", mid=403)) is False
+
+
+# ---------- 长回复截断 ----------
+
+def test_truncate_for_qq():
+    from app.utils import truncate_for_qq
+
+    assert truncate_for_qq("short") == "short"
+    long = "x" * 5000
+    out = truncate_for_qq(long)
+    assert len(out) < 5000
+    assert "已截断" in out
