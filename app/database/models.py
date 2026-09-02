@@ -119,3 +119,25 @@ CREATE TABLE IF NOT EXISTS pending_broadcasts (
     expires_at  TEXT NOT NULL
 );
 """
+
+OUTBOUND_MESSAGES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS outbound_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_type     TEXT NOT NULL CHECK(target_type IN ('user', 'group')),
+    target_id       TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sending', 'retry', 'sent', 'failed')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    max_attempts    INTEGER NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    locked_at       TEXT,
+    last_error      TEXT,
+    message_id      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    sent_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_messages_due
+    ON outbound_messages(status, next_attempt_at);
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA), (2, OUTBOUND_MESSAGES_SCHEMA))

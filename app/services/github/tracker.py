@@ -104,7 +104,7 @@ class GitHubTracker:
                 continue
             message = format_check_result(result)
             for target in await self._db.fetch_github_notifications(repo["id"]):
-                sender = self._dispatcher.send_user if target["target_type"] == "user" else self._dispatcher.send_group
+                sender = self._dispatcher.enqueue_user if target["target_type"] == "user" else self._dispatcher.enqueue_group
                 try:
                     await sender(target["target_id"], message)
                 except Exception:

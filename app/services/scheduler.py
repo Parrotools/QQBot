@@ -69,6 +69,28 @@ class SchedulerService:
     def register_handler(self, task_type: str, handler: TaskHandler) -> None:
         self._handlers[task_type] = handler
 
+    @property
+    def is_running(self) -> bool:
+        return self._started
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs()) if self._started else 0
+
+    async def sync_system_task(self, task_type: str, cron_expression: str) -> None:
+        task = await self._db.fetch_scheduled_task_by_owner_type("__system__", task_type)
+        cron_expression = cron_expression.strip()
+        if not cron_expression:
+            if task is not None and task["enabled"]:
+                await self._db.update_scheduled_task_schedule(task["id"], None, None, False)
+            return
+        if task is None:
+            await self.create_task("__system__", task_type, {}, cron_expression=cron_expression)
+            return
+        if task["cron_expression"] != cron_expression or not task["enabled"]:
+            next_run = self._next_cron_run(cron_expression)
+            await self._db.update_scheduled_task_schedule(task["id"], cron_expression, next_run.isoformat(), True)
+
     async def start(self) -> None:
         if self._started:
             return
@@ -172,9 +194,7 @@ class SchedulerService:
         payload = task["payload"]
         if payload.get("target_type") != "user" or str(payload.get("target_id")) != str(task["owner_id"]):
             raise SchedulerValidationError("提醒只能发送给任务创建者本人")
-        result = await self._dispatcher.send_user(task["owner_id"], str(payload["message"]))
-        if not result.success:
-            logger.warning("提醒发送失败 task_id=%s owner=%s", task["id"], task["owner_id"])
+        await self._dispatcher.enqueue_user(task["owner_id"], str(payload["message"]))
 
     def _schedule(self, task: dict) -> bool:
         if task["cron_expression"]:

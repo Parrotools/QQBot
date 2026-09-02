@@ -16,6 +16,7 @@
 - 安全：SSRF 逐跳校验、Prompt Injection 定界防御、LLM 无任何发送能力、API Key 不入日志
 
 > 详细命令用法和操作流程见 [USAGE.md](USAGE.md)。
+> 长期运行、升级、备份和故障排查见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 架构
 

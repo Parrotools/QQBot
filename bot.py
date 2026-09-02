@@ -10,6 +10,7 @@ NapCatQQ 通过 OneBot 11 反向 WebSocket 连接到本进程：
 from pathlib import Path
 
 import nonebot
+from fastapi.responses import JSONResponse
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
 nonebot.init()
@@ -34,6 +35,17 @@ async def _shutdown() -> None:
 
 driver.on_startup(_startup)
 driver.on_shutdown(_shutdown)
+
+
+@driver.server_app.get("/healthz")
+async def healthz():
+    from app.services.runtime import get_runtime
+
+    try:
+        result = await get_runtime().health.check()
+    except RuntimeError:
+        return JSONResponse({"ok": False, "detail": "starting"}, status_code=503)
+    return JSONResponse(result, status_code=200 if result["ok"] else 503)
 
 if __name__ == "__main__":
     nonebot.run()

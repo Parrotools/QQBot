@@ -19,9 +19,14 @@ async def db(tmp_path):
 class FakeDispatcher:
     def __init__(self):
         self.calls: list[tuple[str, str, str]] = []
+        self.enqueued: list[tuple[str, str, str]] = []
 
     async def send_user(self, user_id: str, message: str):
         self.calls.append(("user", user_id, message))
+
+    async def enqueue_user(self, user_id: str, message: str):
+        self.enqueued.append(("user", user_id, message))
+        return 1
 
 
 def test_parse_one_time_and_cron_reminders():
@@ -66,7 +71,7 @@ async def test_create_and_run_one_time_reminder(db):
     )
     await scheduler.run_task(task_id)
 
-    assert dispatcher.calls == [("user", "user-1", "记得提交周报")]
+    assert dispatcher.enqueued == [("user", "user-1", "记得提交周报")]
     row = await db.fetchone("SELECT enabled, last_run FROM scheduled_tasks WHERE id = ?", (task_id,))
     assert row["enabled"] == 0
     assert row["last_run"] is not None
@@ -95,3 +100,21 @@ async def test_scheduler_starts_and_registers_persisted_task(db):
         assert scheduler._scheduler.get_job(f"scheduled-task-{task_id}") is not None
     finally:
         await scheduler.stop()
+
+
+async def test_system_task_cron_is_updated_and_can_be_disabled(db):
+    async def github_check(_task: dict) -> None:
+        return None
+
+    scheduler = SchedulerService(db, FakeDispatcher(), timezone_name="UTC")
+    scheduler.register_handler("github_check", github_check)
+    await scheduler.create_task("__system__", "github_check", {}, cron_expression="0 * * * *")
+
+    await scheduler.sync_system_task("github_check", "5 * * * *")
+    updated = await db.fetch_scheduled_task_by_owner_type("__system__", "github_check")
+    assert updated["cron_expression"] == "5 * * * *"
+    assert updated["enabled"] == 1
+
+    await scheduler.sync_system_task("github_check", "")
+    disabled = await db.fetch_scheduled_task_by_owner_type("__system__", "github_check")
+    assert disabled["enabled"] == 0

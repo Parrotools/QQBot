@@ -2,7 +2,12 @@ import httpx
 import pytest
 
 from app.database.db import Database
-from app.services.github.client import GitHubClient, GitHubRateLimitError, parse_snapshot_payload
+from app.services.github.client import (
+    GitHubAPIError,
+    GitHubClient,
+    GitHubRateLimitError,
+    parse_snapshot_payload,
+)
 from app.services.github.tracker import (
     GitHubTracker,
     GitHubTrackerError,
@@ -108,6 +113,32 @@ async def test_github_client_reports_rate_limit():
         await client.aclose()
 
 
+async def test_github_client_wraps_invalid_json_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not json")
+
+    client = GitHubClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(GitHubAPIError, match="响应格式无效"):
+            await client.get_repository("OpenAI", "openai-python")
+    finally:
+        await client.aclose()
+
+
+async def test_github_client_wraps_invalid_commits_json_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits"):
+            return httpx.Response(200, content=b"not json")
+        return httpx.Response(200, json={})
+
+    client = GitHubClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(GitHubAPIError, match="响应格式无效"):
+            await client.fetch_snapshot(parse_repo_url("https://github.com/OpenAI/openai-python"))
+    finally:
+        await client.aclose()
+
+
 class FakeGitHubClient:
     def __init__(self, snapshot):
         self.snapshot = snapshot
@@ -172,12 +203,21 @@ async def test_remove_repository_cleans_snapshots_and_notifications(db):
 class FakeDispatcher:
     def __init__(self):
         self.calls: list[tuple[str, str, str]] = []
+        self.enqueued: list[tuple[str, str, str]] = []
 
     async def send_user(self, user_id: str, message: str):
         self.calls.append(("user", user_id, message))
 
     async def send_group(self, group_id: str, message: str):
         self.calls.append(("group", group_id, message))
+
+    async def enqueue_user(self, user_id: str, message: str):
+        self.enqueued.append(("user", user_id, message))
+        return 1
+
+    async def enqueue_group(self, group_id: str, message: str):
+        self.enqueued.append(("group", group_id, message))
+        return 1
 
 
 async def test_scheduled_check_sends_only_when_github_notifications_are_enabled(db):
@@ -197,8 +237,8 @@ async def test_scheduled_check_sends_only_when_github_notifications_are_enabled(
     client.snapshot = _snapshot("third", stars=3)
     await tracker.run_scheduled_check({})
 
-    assert dispatcher.calls and dispatcher.calls[0][0:2] == ("user", "999")
-    assert "OpenAI/openai-python" in dispatcher.calls[0][2]
+    assert dispatcher.enqueued and dispatcher.enqueued[0][0:2] == ("user", "999")
+    assert "OpenAI/openai-python" in dispatcher.enqueued[0][2]
 
 
 def test_parse_github_command():

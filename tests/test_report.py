@@ -19,9 +19,14 @@ async def db(tmp_path):
 class FakeDispatcher:
     def __init__(self):
         self.calls: list[tuple[str, str]] = []
+        self.enqueued: list[tuple[str, str]] = []
 
     async def send_user(self, user_id: str, message: str):
         self.calls.append((str(user_id), message))
+
+    async def enqueue_user(self, user_id: str, message: str):
+        self.enqueued.append((str(user_id), message))
+        return 1
 
 
 def _snapshot(sha: str, stars: int) -> GitHubSnapshot:
@@ -71,6 +76,6 @@ async def test_scheduled_daily_report_respects_user_setting_and_sends(db):
 
     await service.run_scheduled_report({"report_date": "2030-01-02"})
 
-    assert len(dispatcher.calls) == 1
-    assert dispatcher.calls[0][0] == "user-1"
+    assert len(dispatcher.enqueued) == 1
+    assert dispatcher.enqueued[0][0] == "user-1"
     assert await db.fetchone("SELECT COUNT(*) AS count FROM reports", ()) == {"count": 1}

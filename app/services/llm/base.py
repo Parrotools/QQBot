@@ -36,3 +36,7 @@ class LLMProvider(ABC):
 
     async def aclose(self) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    async def check_health(self) -> None:
+        raise NotImplementedError

@@ -9,7 +9,9 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from app.database.db import Database
 from app.services.qq.broadcast_parser import BroadcastTarget
@@ -54,11 +56,85 @@ class BroadcastReport:
 
 
 class MessageDispatcher:
-    def __init__(self, db: Database, rate_limit_per_second: float = 1.0, api_caller: ApiCaller | None = None):
+    def __init__(
+        self,
+        db: Database,
+        rate_limit_per_second: float = 1.0,
+        api_caller: ApiCaller | None = None,
+        retry_delay_seconds: float = 30.0,
+        max_attempts: int = 3,
+        queue_poll_seconds: float = 1.0,
+        lease_seconds: float = 60.0,
+    ):
         self._db = db
         self._interval = 1.0 / rate_limit_per_second if rate_limit_per_second and rate_limit_per_second > 0 else 0.0
-        # 测试注入；生产环境默认走 nonebot.get_bot()
         self._api_caller = api_caller
+        self._retry_delay_seconds = max(0.0, retry_delay_seconds)
+        self._max_attempts = max(1, max_attempts)
+        self._queue_poll_seconds = max(0.1, queue_poll_seconds)
+        self._lease_seconds = max(1.0, lease_seconds)
+        self._queue_task: asyncio.Task | None = None
+        self._queue_wakeup = asyncio.Event()
+
+    async def enqueue_user(self, user_id: str, message: str, max_attempts: int | None = None) -> int:
+        return await self._enqueue("user", str(user_id), message, max_attempts)
+
+    async def enqueue_group(self, group_id: str, message: str, max_attempts: int | None = None) -> int:
+        return await self._enqueue("group", str(group_id), message, max_attempts)
+
+    async def _enqueue(self, target_type: str, target_id: str, message: str, max_attempts: int | None) -> int:
+        message_id = await self._db.enqueue_outbound_message(
+            target_type, target_id, message, max(1, max_attempts or self._max_attempts)
+        )
+        self._queue_wakeup.set()
+        return message_id
+
+    async def start(self) -> None:
+        if self._queue_task is None:
+            self._queue_task = asyncio.create_task(self._queue_loop(), name="outbound-message-worker")
+
+    async def stop(self) -> None:
+        if self._queue_task is not None:
+            self._queue_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._queue_task
+            self._queue_task = None
+
+    async def _queue_loop(self) -> None:
+        while True:
+            try:
+                await self.process_outbound_messages()
+            except Exception:
+                logger.exception("主动消息队列处理失败")
+            self._queue_wakeup.clear()
+            try:
+                await asyncio.wait_for(self._queue_wakeup.wait(), timeout=self._queue_poll_seconds)
+            except TimeoutError:
+                pass
+
+    async def process_outbound_messages(self, limit: int = 20) -> int:
+        processed = 0
+        for _ in range(max(1, limit)):
+            now = datetime.now(UTC)
+            row = await self._db.claim_outbound_message(
+                now.strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(seconds=self._lease_seconds)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            if row is None:
+                break
+            result = await self._send(str(row["target_type"]), str(row["target_id"]), str(row["content"]))
+            if result.success:
+                await self._db.mark_outbound_message_sent(
+                    int(row["id"]), datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), result.message_id
+                )
+            else:
+                retry_at = datetime.now(UTC) + timedelta(seconds=self._retry_delay_seconds)
+                await self._db.retry_outbound_message(
+                    int(row["id"]), int(row["attempts"]), int(row["max_attempts"]),
+                    retry_at.strftime("%Y-%m-%d %H:%M:%S"), result.error or "发送失败"
+                )
+            processed += 1
+        return processed
 
     async def _call_api(self, action: str, **params) -> dict:
         if self._api_caller is not None:

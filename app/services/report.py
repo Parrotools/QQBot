@@ -53,7 +53,7 @@ class ReportService:
                     continue
                 content = await self.build_daily_report(owner_id, report_date)
                 await self._db.save_report(owner_id, "daily", period_start, period_end, content)
-                await self._dispatcher.send_user(owner_id, content)
+                await self._dispatcher.enqueue_user(owner_id, content)
             except Exception:
                 logging.getLogger(__name__).exception("日报发送失败 owner=%s", owner_id)
 

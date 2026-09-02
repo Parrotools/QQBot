@@ -6,6 +6,7 @@ bot.py 启动时调用 init_runtime()，关闭时调用 close_runtime()；
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 
 from app.config import Settings, get_settings
@@ -14,6 +15,7 @@ from app.personality.manager import PersonalityManager
 from app.security.permissions import PermissionService
 from app.services.github.client import GitHubClient
 from app.services.github.tracker import GitHubTracker
+from app.services.health import HealthService
 from app.services.llm.base import LLMProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
 from app.services.memory import MemoryService
@@ -37,6 +39,7 @@ class Runtime:
     scheduler: SchedulerService
     github_client: GitHubClient
     github: GitHubTracker
+    health: HealthService
     report: ReportService
     sessions: SessionManager
     llm: LLMProvider
@@ -72,7 +75,14 @@ async def init_runtime() -> Runtime:
         timeout=settings.llm_timeout,
         max_concurrency=settings.max_concurrent_llm_tasks,
     )
-    dispatcher = MessageDispatcher(db, rate_limit_per_second=settings.send_rate_limit_per_second)
+    dispatcher = MessageDispatcher(
+        db,
+        rate_limit_per_second=settings.send_rate_limit_per_second,
+        max_attempts=settings.outbound_max_attempts,
+        retry_delay_seconds=settings.outbound_retry_delay_seconds,
+        queue_poll_seconds=settings.outbound_queue_poll_seconds,
+        lease_seconds=settings.outbound_lease_seconds,
+    )
     notifications = NotificationSettingsService(db)
     github_client = GitHubClient(token=settings.github_token)
     github = GitHubTracker(db, github_client, dispatcher, notifications)
@@ -84,8 +94,7 @@ async def init_runtime() -> Runtime:
         ("github_check", settings.github_check_cron),
         ("daily_report", settings.daily_report_cron),
     ):
-        if cron_expression and await db.fetch_scheduled_task_by_owner_type("__system__", task_type) is None:
-            await scheduler.create_task("__system__", task_type, {}, cron_expression=cron_expression)
+        await scheduler.sync_system_task(task_type, cron_expression)
     fetcher = WebFetcher(
         max_bytes=settings.max_webpage_bytes,
         connect_timeout=settings.web_fetch_timeout_connect,
@@ -103,6 +112,7 @@ async def init_runtime() -> Runtime:
         max_chunks=settings.web_summary_max_chunks,
     )
 
+    started_at = time.monotonic()
     _runtime = Runtime(
         settings=settings,
         db=db,
@@ -112,6 +122,7 @@ async def init_runtime() -> Runtime:
         scheduler=scheduler,
         github_client=github_client,
         github=github,
+        health=HealthService(db, llm, github_client, scheduler, started_at),
         report=report,
         sessions=SessionManager(db, settings.max_context_messages),
         llm=llm,
@@ -122,6 +133,7 @@ async def init_runtime() -> Runtime:
         summarizer=summarizer,
         web_semaphore=asyncio.Semaphore(max(1, settings.max_concurrent_web_tasks)),
     )
+    await dispatcher.start()
     await scheduler.start()
     return _runtime
 
@@ -143,6 +155,10 @@ async def close_runtime() -> None:
         await rt.scheduler.stop()
     except Exception:
         logger.exception("关闭 Scheduler 失败")
+    try:
+        await rt.dispatcher.stop()
+    except Exception:
+        logger.exception("关闭主动消息队列失败")
     try:
         await rt.llm.aclose()
     except Exception:

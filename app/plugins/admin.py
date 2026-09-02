@@ -23,16 +23,16 @@ status_matcher = on_message(rule=Rule(_status_trigger), priority=5, block=True)
 @status_matcher.handle()
 async def _handle(event: MessageEvent, matcher_: Matcher):
     runtime = get_runtime()
-    s = runtime.settings
-    row = await runtime.db.fetchone("SELECT COUNT(*) AS c FROM sessions")
-    session_count = row["c"] if row else 0
+    status = await runtime.health.check()
+    counts = status["counts"]
+    errors = status["recent_errors"]
     await matcher_.send(
         "qq-llm-bot 运行状态：\n"
-        f"模型：{s.llm_model}\n"
-        f"网页自动总结：{s.url_auto_summary_mode}（缓存 {int(s.web_cache_ttl_seconds)} 秒）\n"
-        f"群聊共享上下文：{s.group_shared_context}\n"
-        f"上下文上限：{s.max_context_messages} 条，活跃会话：{session_count}\n"
-        f"群发确认：{s.broadcast_require_confirm}（上限 {s.max_broadcast_recipients} 个目标）\n"
-        f"管理员数量：{len(runtime.permission.admin_ids)}\n"
-        f"Playwright：{s.enable_playwright}"
+        f"运行时间：{status['uptime_seconds']} 秒\n"
+        f"LLM：{'正常' if status['llm']['ok'] else '异常'}\n"
+        f"数据库：{'正常' if status['database']['ok'] else '异常'}\n"
+        f"Scheduler：{'运行中' if status['scheduler']['running'] else '未运行'}（{status['scheduler']['jobs']} 个任务）\n"
+        f"GitHub 监控：{counts.get('github_repositories', 0)}\n"
+        f"Memory：{counts.get('memories', 0)}\n"
+        f"最近错误：{errors[0]['error'] if errors else '无'}"
     )

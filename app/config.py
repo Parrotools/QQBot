@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     admin_qq_ids: str = ""
     max_broadcast_recipients: int = 20
     send_rate_limit_per_second: float = 1.0
+    outbound_max_attempts: int = 3
+    outbound_retry_delay_seconds: float = 30.0
+    outbound_queue_poll_seconds: float = 1.0
+    outbound_lease_seconds: float = 60.0
     broadcast_require_confirm: bool = True
     broadcast_confirm_ttl_seconds: int = 300
 

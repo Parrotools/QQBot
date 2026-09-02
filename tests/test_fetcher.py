@@ -1,11 +1,16 @@
 """Fetcher 测试：内容类型白名单、大小上限、redirect 逐跳 SSRF 校验。"""
 
+import sys
+from types import ModuleType
+
 import httpx
 import pytest
 
 from app.security.ssrf import SSRFBlockedError
 from app.services.web.fetcher import (
+    FetchTimeoutError,
     PageTooLargeError,
+    PlaywrightFetcher,
     TooManyRedirectsError,
     UnsupportedContentTypeError,
     WebFetcher,
@@ -94,3 +99,102 @@ async def test_too_many_redirects(monkeypatch):
     with pytest.raises(TooManyRedirectsError):
         await f.fetch("https://example.com/start")
     await f.aclose()
+
+
+async def test_playwright_revalidates_final_redirect_url(monkeypatch):
+    class FakePage:
+        url = "http://127.0.0.1/internal"
+
+        async def goto(self, *args, **kwargs):
+            return None
+
+        async def content(self):
+            return "<html></html>"
+
+    class FakeBrowser:
+        async def new_page(self, **kwargs):
+            return FakePage()
+
+        async def close(self):
+            return None
+
+    class FakePlaywright:
+        class chromium:
+            @staticmethod
+            async def launch(**kwargs):
+                return FakeBrowser()
+
+    class FakePlaywrightContext:
+        async def __aenter__(self):
+            return FakePlaywright()
+
+        async def __aexit__(self, *args):
+            return None
+
+    async_api = ModuleType("playwright.async_api")
+    async_api.Error = RuntimeError
+    async_api.TimeoutError = TimeoutError
+    async_api.async_playwright = FakePlaywrightContext
+    playwright = ModuleType("playwright")
+    playwright.async_api = async_api
+    monkeypatch.setitem(sys.modules, "playwright", playwright)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
+
+    checked: list[str] = []
+
+    async def fake_assert_url_safe(url: str):
+        checked.append(url)
+        if url.startswith("http://127.0.0.1"):
+            raise SSRFBlockedError()
+
+    monkeypatch.setattr("app.services.web.fetcher.assert_url_safe", fake_assert_url_safe)
+
+    with pytest.raises(SSRFBlockedError):
+        await PlaywrightFetcher().fetch("https://example.com/page")
+    assert checked == ["https://example.com/page", "http://127.0.0.1/internal"]
+
+
+async def test_playwright_navigation_timeout_is_a_fetch_timeout(monkeypatch):
+    class FakePlaywrightError(Exception):
+        pass
+
+    class FakePlaywrightTimeoutError(FakePlaywrightError):
+        pass
+
+    class FakePage:
+        async def goto(self, *args, **kwargs):
+            raise FakePlaywrightTimeoutError("navigation timed out")
+
+    class FakeBrowser:
+        async def new_page(self, **kwargs):
+            return FakePage()
+
+        async def close(self):
+            return None
+
+    class FakeContext:
+        async def __aenter__(self):
+            return type("Playwright", (), {"chromium": self})()
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def launch(self, **kwargs):
+            return FakeBrowser()
+
+    async_api = ModuleType("playwright.async_api")
+    async_api.Error = FakePlaywrightError
+    async_api.TimeoutError = FakePlaywrightTimeoutError
+    async_api.async_playwright = FakeContext
+    playwright = ModuleType("playwright")
+    playwright.async_api = async_api
+    monkeypatch.setitem(sys.modules, "playwright", playwright)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
+
+    async def allow_url(_url: str):
+        return None
+
+    monkeypatch.setattr("app.services.web.fetcher.assert_url_safe", allow_url)
+
+    with pytest.raises(FetchTimeoutError, match="navigation timed out"):
+        await PlaywrightFetcher().fetch("https://example.com/page")

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from app.database.models import SCHEMA
+from app.database.models import MIGRATIONS
 
 _PENDING_ACTIVE = "active"
 _PENDING_CONFIRMED = "confirmed"
@@ -35,8 +35,7 @@ class Database:
         self._conn = await aiosqlite.connect(self._path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        await self._conn.executescript(SCHEMA)
-        await self._conn.commit()
+        await self._apply_migrations()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -62,6 +61,86 @@ class Database:
         async with self.conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def _apply_migrations(self) -> None:
+        await self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        rows = await self.fetchall("SELECT version FROM schema_migrations", ())
+        applied = {int(row["version"]) for row in rows}
+        for version, sql in MIGRATIONS:
+            if version not in applied:
+                await self.conn.executescript(sql)
+                await self.conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+                await self.conn.commit()
+
+    async def migration_versions(self) -> list[int]:
+        rows = await self.fetchall("SELECT version FROM schema_migrations ORDER BY version", ())
+        return [int(row["version"]) for row in rows]
+
+    # ---------- outbound_messages ----------
+
+    async def enqueue_outbound_message(
+        self, target_type: str, target_id: str, content: str, max_attempts: int
+    ) -> int:
+        cursor = await self.conn.execute(
+            "INSERT INTO outbound_messages "
+            "(target_type, target_id, content, max_attempts, next_attempt_at) VALUES (?, ?, ?, ?, ?)",
+            (target_type, target_id, content, max_attempts, _now()),
+        )
+        await self.conn.commit()
+        return int(cursor.lastrowid)
+
+    async def claim_outbound_message(self, now: str, lease_before: str) -> dict | None:
+        async with self.conn.execute(
+            "SELECT id FROM outbound_messages WHERE "
+            "((status IN ('pending', 'retry') AND next_attempt_at <= ?) "
+            "OR (status = 'sending' AND locked_at <= ?)) ORDER BY id LIMIT 1",
+            (now, lease_before),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        message_id = int(row["id"])
+        await self.conn.execute(
+            "UPDATE outbound_messages SET status = 'sending', attempts = attempts + 1, locked_at = ? "
+            "WHERE id = ?",
+            (now, message_id),
+        )
+        await self.conn.commit()
+        return await self.fetchone("SELECT * FROM outbound_messages WHERE id = ?", (message_id,))
+
+    async def mark_outbound_message_sent(self, message_id: int, sent_at: str, qq_message_id: str | None) -> None:
+        await self.execute(
+            "UPDATE outbound_messages SET status = 'sent', sent_at = ?, message_id = ?, locked_at = NULL, "
+            "last_error = NULL WHERE id = ?",
+            (sent_at, qq_message_id, message_id),
+        )
+
+    async def retry_outbound_message(
+        self, message_id: int, attempts: int, max_attempts: int, next_attempt_at: str, error: str
+    ) -> None:
+        if attempts >= max_attempts:
+            await self.execute(
+                "UPDATE outbound_messages SET status = 'failed', locked_at = NULL, last_error = ? WHERE id = ?",
+                (error[:500], message_id),
+            )
+            return
+        await self.execute(
+            "UPDATE outbound_messages SET status = 'retry', next_attempt_at = ?, locked_at = NULL, last_error = ? "
+            "WHERE id = ?",
+            (next_attempt_at, error[:500], message_id),
+        )
+
+    async def outbound_message_counts(self) -> dict[str, int]:
+        rows = await self.fetchall("SELECT status, COUNT(*) AS count FROM outbound_messages GROUP BY status", ())
+        return {str(row["status"]): int(row["count"]) for row in rows}
+
+    async def fetch_recent_errors(self, limit: int = 5) -> list[dict]:
+        return await self.fetchall(
+            "SELECT error, created_at FROM send_logs WHERE success = 0 ORDER BY id DESC LIMIT ?", (max(1, limit),)
+        )
 
     # ---------- send_logs ----------
 
@@ -133,6 +212,14 @@ class Database:
         await self.execute(
             "UPDATE scheduled_tasks SET last_run = ?, next_run = ?, enabled = ? WHERE id = ?",
             (last_run, next_run, int(enabled), task_id),
+        )
+
+    async def update_scheduled_task_schedule(
+        self, task_id: int, cron_expression: str | None, next_run: str | None, enabled: bool
+    ) -> None:
+        await self.execute(
+            "UPDATE scheduled_tasks SET cron_expression = ?, next_run = ?, enabled = ? WHERE id = ?",
+            (cron_expression, next_run, int(enabled), task_id),
         )
 
     # ---------- notification_settings ----------

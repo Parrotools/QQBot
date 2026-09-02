@@ -195,19 +195,27 @@ class PlaywrightFetcher:
     async def fetch(self, url: str) -> FetchResult:
         await assert_url_safe(url)  # Playwright 一样要过 SSRF 检查
         try:
+            from playwright.async_api import Error as PlaywrightError
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
             from playwright.async_api import async_playwright
         except ImportError as e:
             raise FetchError("Playwright 未安装，无法渲染 JavaScript 网页") from e
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            try:
-                page = await browser.new_page(user_agent=DEFAULT_USER_AGENT)
-                await page.goto(url, timeout=self._timeout_ms, wait_until="domcontentloaded")
-                final_url = page.url
-                html = await page.content()
-            finally:
-                await browser.close()
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page(user_agent=DEFAULT_USER_AGENT)
+                    await page.goto(url, timeout=self._timeout_ms, wait_until="domcontentloaded")
+                    final_url = page.url
+                    await assert_url_safe(final_url)
+                    html = await page.content()
+                finally:
+                    await browser.close()
+        except PlaywrightTimeoutError as e:
+            raise FetchTimeoutError(str(e)) from e
+        except PlaywrightError as e:
+            raise FetchNetworkError(str(e)) from e
 
         if len(html.encode("utf-8")) > self._max_bytes:
             raise PageTooLargeError()

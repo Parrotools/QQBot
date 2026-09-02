@@ -68,10 +68,13 @@ class GitHubClient:
     async def get_repository(self, owner: str, name: str) -> dict:
         return await self._get_json(f"/repos/{owner}/{name}")
 
+    async def check_health(self) -> None:
+        await self._get("/rate_limit")
+
     async def fetch_snapshot(self, ref: GitHubRepoRef) -> GitHubSnapshot:
         repository = await self.get_repository(ref.owner, ref.name)
         commits_response = await self._get(f"/repos/{ref.owner}/{ref.name}/commits", params={"per_page": 1})
-        commits = commits_response.json()
+        commits = self._decode_json(commits_response)
         if not isinstance(commits, list):
             raise GitHubAPIError("GitHub commits 响应格式无效")
         commit = commits[0] if commits else {}
@@ -86,10 +89,17 @@ class GitHubClient:
 
     async def _get_json(self, path: str) -> dict:
         response = await self._get(path)
-        data = response.json()
+        data = self._decode_json(response)
         if not isinstance(data, dict):
             raise GitHubAPIError("GitHub API 响应格式无效")
         return data
+
+    @staticmethod
+    def _decode_json(response: httpx.Response) -> object:
+        try:
+            return response.json()
+        except ValueError as e:
+            raise GitHubAPIError("GitHub API 响应格式无效") from e
 
     async def _get(self, path: str, *, params: dict | None = None) -> httpx.Response:
         try:
