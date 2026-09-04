@@ -224,7 +224,7 @@ user:789012
 | `LLM_API_KEY` | — | API Key |
 | `LLM_MODEL` | glm-4-flash | 模型名 |
 | `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
-| `LLM_TEMPERATURE` | 0.7 | 基准采样温度；闲聊自动略升、技术问答自动略降 |
+| `LLM_TEMPERATURE` | 0.9 | 基准采样温度；闲聊自动略升、技术问答自动略降 |
 | `NON_LLM_REPLY_DELAY_MIN_SECONDS` / `_MAX_SECONDS` | 2 / 6 | 不调用 LLM 回复的动态延迟范围；最大值设为 0 可关闭 |
 | `NON_LLM_REPLY_DELAY_CHARS_PER_SECOND` | 35 | 动态延迟的文本处理速度，每秒字符数 |
 | `PERSONALITY_FILE` | app/personality/rumi.yaml | YAML 人格配置路径 |

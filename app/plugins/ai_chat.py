@@ -151,7 +151,7 @@ def _owner_identity_reply(event: MessageEvent, text: str, runtime) -> str | None
 
 def _temperature(runtime, mode: str) -> float:
     """给闲聊一点表达空间，技术问答收窄随机性；不改变 provider 的接口契约。"""
-    base = float(getattr(runtime.settings, "llm_temperature", 0.7))
+    base = float(getattr(runtime.settings, "llm_temperature", 0.9))
     base = max(0.0, min(2.0, base))
     delta = 0.1 if mode in {"casual", "intimate"} else -0.1
     return max(0.0, min(2.0, base + delta))

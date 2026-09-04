@@ -58,6 +58,19 @@ def test_default_rumi_profile_has_contextual_examples():
     assert len(owner_examples) <= 12  # 最多 6 组 user/assistant 示例
 
 
+def test_rumi_profile_is_lively_and_girlish():
+    path = Path(__file__).parents[1] / "app" / "personality" / "rumi.yaml"
+    manager = PersonalityManager(path)
+
+    assert "热情" in manager.personality.description
+    assert any("少女感" in item for item in manager.personality.tone)
+    assert any("情绪反应" in item for item in manager.personality.style)
+
+
+def test_default_temperature_is_more_expressive_without_changing_technical_delta():
+    assert Settings(_env_file=None).llm_temperature == pytest.approx(0.9)
+
+
 def test_owner_identity_prefers_explicit_id_and_supports_single_admin_fallback():
     assert Settings(owner_qq_id="owner", admin_qq_ids="admin").owner_id == "owner"
     assert Settings(owner_qq_id="", admin_qq_ids="owner").owner_id == "owner"

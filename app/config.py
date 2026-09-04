@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "glm-4-flash"
     llm_timeout: float = 60.0
-    llm_temperature: float = 0.7
+    llm_temperature: float = 0.9
     # 不调用 LLM 的交互回复动态延迟：按文本量增长，并在最小/最大值之间限制
     non_llm_reply_delay_min_seconds: float = 2.0
     non_llm_reply_delay_max_seconds: float = 6.0
