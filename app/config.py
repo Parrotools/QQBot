@@ -19,9 +19,12 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "glm-4-flash"
     llm_timeout: float = 60.0
+    llm_temperature: float = 0.7
 
     # 人格
-    personality_file: str = "app/personality/luna.yaml"
+    personality_file: str = "app/personality/rumi.yaml"
+    owner_qq_id: str = ""
+    owner_name: str = "Parrotools"
 
     # 会话
     max_context_messages: int = 20
@@ -66,6 +69,15 @@ class Settings(BaseSettings):
     @property
     def admin_ids(self) -> frozenset[str]:
         return frozenset(x.strip() for x in self.admin_qq_ids.split(",") if x.strip())
+
+    @property
+    def owner_id(self) -> str:
+        explicit_owner = self.owner_qq_id.strip()
+        if explicit_owner:
+            return explicit_owner
+        # 兼容只有一个管理员的既有部署；多个管理员时必须显式配置 OWNER_QQ_ID。
+        admin_ids = self.admin_ids
+        return next(iter(admin_ids), "") if len(admin_ids) == 1 else ""
 
 
 @lru_cache

@@ -83,7 +83,7 @@ async def test_chat_includes_user_memory_in_system_messages(monkeypatch):
             return None
 
     class FakeLLM:
-        async def chat(self, messages: list[dict]) -> str:
+        async def chat(self, messages: list[dict], **kwargs) -> str:
             seen.append(messages)
             return "答复"
 
@@ -92,7 +92,7 @@ async def test_chat_includes_user_memory_in_system_messages(monkeypatch):
         memory=FakeMemory(),
         sessions=FakeSessions(),
         llm=FakeLLM(),
-        settings=SimpleNamespace(group_shared_context=False),
+        settings=SimpleNamespace(group_shared_context=False, llm_temperature=0.7),
     )
     event = SimpleNamespace(
         user_id="20000",
@@ -109,4 +109,7 @@ async def test_chat_includes_user_memory_in_system_messages(monkeypatch):
 
     await ai_chat._handle(event)
 
-    assert seen[0][1] == {"role": "system", "content": "MEMORY_CONTEXT"}
+    assert seen[0][0]["role"] == "system"
+    assert "MEMORY_CONTEXT" in seen[0][0]["content"]
+    assert sum(message["role"] == "system" for message in seen[0]) == 1
+    assert seen[0][-1] == {"role": "user", "content": "你好"}

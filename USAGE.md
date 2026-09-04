@@ -224,7 +224,10 @@ user:789012
 | `LLM_API_KEY` | — | API Key |
 | `LLM_MODEL` | glm-4-flash | 模型名 |
 | `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
-| `PERSONALITY_FILE` | app/personality/luna.yaml | YAML 人格配置路径 |
+| `LLM_TEMPERATURE` | 0.7 | 基准采样温度；闲聊自动略升、技术问答自动略降 |
+| `PERSONALITY_FILE` | app/personality/rumi.yaml | YAML 人格配置路径 |
+| `OWNER_QQ_ID` | — | 主人的真实 QQ 号；不按昵称判断（留空且只有一个管理员时回退到该 ID） |
+| `OWNER_NAME` | Parrotools | 主人称呼 |
 | `MAX_CONTEXT_MESSAGES` | 20 | 上下文最大条数 |
 | `GROUP_SHARED_CONTEXT` | false | 群共享上下文 |
 | `URL_AUTO_SUMMARY_MODE` | mentioned | off / mentioned / all |

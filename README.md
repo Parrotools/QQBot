@@ -6,7 +6,7 @@
 
 - 私聊 / 群聊 @ / 回复机器人续聊，群内普通消息不响应，未知命令给帮助而不是丢给 LLM
 - 多轮上下文会话（SQLite 持久化，群内成员默认独立上下文），`/clear` 清空
-- YAML 可配置人格（默认 Luna）
+- YAML 可配置人格（默认 Rumi）
 - 用户显式维护的长期记忆，并在聊天时按重要度加载
 - 一次性与 cron 定时提醒（通知默认关闭）
 - GitHub 仓库监控：手动检查、commit/Star/Fork/Issue/Release 变化通知
@@ -101,7 +101,9 @@ cp .env.example .env      # Windows: copy .env.example .env
 | `ONEBOT_ACCESS_TOKEN` | 自定一个随机字符串，**必须与 NapCat 侧填的完全一致** |
 | `LLM_API_KEY` | 你的 LLM API Key |
 | `LLM_BASE_URL` / `LLM_MODEL` | 按厂商填，如 GLM：`https://open.bigmodel.cn/api/paas/v4` + `glm-4-flash` |
-| `PERSONALITY_FILE` | 人格 YAML 文件路径，默认 `app/personality/luna.yaml` |
+| `PERSONALITY_FILE` | 人格 YAML 文件路径，默认 `app/personality/rumi.yaml` |
+| `OWNER_QQ_ID` | 主人的真实 QQ 号；只按此 ID 识别主人，不按昵称猜测（留空且只有一个管理员时回退到该 ID） |
+| `OWNER_NAME` | 主人称呼，默认 `Parrotools` |
 
 其余变量（限速、并发、网页大小上限、URL 缓存等）默认值即可运行，详见 `.env.example` 注释。
 

@@ -6,6 +6,7 @@ from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
 from nonebot.rule import Rule
 
+from app.personality.manager import PersonaContext
 from app.promptlib import load_prompt
 from app.services.llm.base import LLMError
 from app.services.runtime import get_runtime
@@ -45,6 +46,14 @@ HELP_TEXT = (
 _DEDUP: OrderedDict[str, None] = OrderedDict()
 _DEDUP_MAX = 4096
 
+_TECHNICAL_HINTS = (
+    "代码", "报错", "bug", "debug", "编译", "运行", "算法", "复杂度", "排序", "函数", "类", "接口",
+    "python", "java", "javascript", "typescript", "c++", "rust", "go语言", "linux", "git", "github",
+    "sql", "数据库", "网络", "协议", "并发", "线程", "进程", "性能", "优化", "部署", "命令行",
+    "traceback", "exception", "error", "benchmark", "cuda", "mpi", "openmp", "simd",
+    "```",
+)
+
 
 def _claim(message_id: str) -> bool:
     if message_id in _DEDUP:
@@ -57,6 +66,68 @@ def _claim(message_id: str) -> bool:
 
 def _is_self(event: MessageEvent) -> bool:
     return str(event.user_id) == str(event.self_id)
+
+
+def _is_owner(event: MessageEvent, runtime) -> bool:
+    """只用配置中的 QQ ID 识别主人，昵称、群名片和自述都不参与判断。"""
+    configured_owner = getattr(runtime.settings, "owner_id", "")
+    if not configured_owner:
+        configured_owner = getattr(runtime.settings, "owner_qq_id", "")
+    return bool(str(configured_owner).strip()) and str(event.user_id) == str(configured_owner).strip()
+
+
+def _conversation_mode(text: str) -> str:
+    lowered = text.lower()
+    return "technical" if any(hint in lowered for hint in _TECHNICAL_HINTS) else "casual"
+
+
+def _persona_context(event: MessageEvent, text: str, runtime) -> PersonaContext:
+    sender = getattr(event, "sender", None)
+    sender_name = getattr(sender, "card", None) or getattr(sender, "nickname", "") or ""
+    settings = runtime.settings
+    return PersonaContext(
+        relationship="owner" if _is_owner(event, runtime) else "normal",
+        mode=_conversation_mode(text),
+        conversation_mood="normal",
+        sender_name=str(sender_name),
+        owner_name=str(getattr(settings, "owner_name", "Parrotools") or "Parrotools"),
+    )
+
+
+def _temperature(runtime, mode: str) -> float:
+    """给闲聊一点表达空间，技术问答收窄随机性；不改变 provider 的接口契约。"""
+    base = float(getattr(runtime.settings, "llm_temperature", 0.7))
+    base = max(0.0, min(2.0, base))
+    delta = 0.1 if mode == "casual" else -0.1
+    return max(0.0, min(2.0, base + delta))
+
+
+def _build_system_prompt(runtime, context: PersonaContext, memory_context: str) -> str:
+    """兼容旧的轻量测试替身，同时让正式 PersonalityManager 收到完整情境。"""
+    builder = runtime.personality.build_system_prompt
+    try:
+        return builder(CHAT_SYSTEM_PROMPT, context=context, memory_context=memory_context)
+    except TypeError as exc:
+        if "unexpected keyword" not in str(exc):
+            raise
+        prompt = builder(CHAT_SYSTEM_PROMPT)
+        return f"{prompt}\n\n{memory_context.strip()}" if memory_context.strip() else prompt
+
+
+def _build_chat_messages(
+    runtime, event: MessageEvent, text: str, history: list[dict], memory_context: str
+) -> tuple[list[dict], PersonaContext]:
+    context = _persona_context(event, text, runtime)
+    messages = [{
+        "role": "system",
+        "content": _build_system_prompt(runtime, context, memory_context),
+    }]
+    few_shot_builder = getattr(runtime.personality, "build_few_shot_messages", None)
+    if few_shot_builder is not None:
+        messages.extend(few_shot_builder(context))
+    messages.extend(history)
+    messages.append({"role": "user", "content": text})
+    return messages, context
 
 
 def _session_key(event: MessageEvent) -> str:
@@ -114,19 +185,13 @@ async def _handle(event: MessageEvent):
         return
 
     history = await runtime.sessions.get_context(session_key)
-    messages = [
-        {"role": "system", "content": runtime.personality.build_system_prompt(CHAT_SYSTEM_PROMPT)},
-    ]
     memory_context = await runtime.memory.context_prompt(str(event.user_id))
-    if memory_context:
-        messages.append({"role": "system", "content": memory_context})
-    messages.extend(history)
-    messages.append({"role": "user", "content": text})
+    messages, context = _build_chat_messages(runtime, event, text, history, memory_context)
 
     logger.info("LLM chat session=%s user=%s group=%s msg=%s",
                 session_key, event.user_id, getattr(event, "group_id", "-"), event.message_id)
     try:
-        reply = await runtime.llm.chat(messages)
+        reply = await runtime.llm.chat(messages, temperature=_temperature(runtime, context.mode))
     except LLMError:
         logger.exception("LLM 调用失败 session=%s", session_key)
         await matcher.send("AI 服务暂时不可用，请稍后再试。")
