@@ -222,6 +222,20 @@ class Database:
             (cron_expression, next_run, int(enabled), task_id),
         )
 
+    async def fetch_scheduled_content_history(self, task_id: int, limit: int = 20) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT content FROM scheduled_content_history WHERE task_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (task_id, max(1, limit)),
+        )
+        return [str(row["content"]) for row in rows]
+
+    async def insert_scheduled_content_history(self, task_id: int, content: str) -> None:
+        await self.execute(
+            "INSERT OR IGNORE INTO scheduled_content_history (task_id, content) VALUES (?, ?)",
+            (task_id, content),
+        )
+
     # ---------- notification_settings ----------
 
     async def fetch_notification_settings(self, user_id: str) -> dict | None:

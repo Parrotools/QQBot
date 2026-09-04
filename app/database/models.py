@@ -149,8 +149,21 @@ CREATE TABLE IF NOT EXISTS github_digest_targets (
 );
 """
 
+SCHEDULED_CONTENT_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS scheduled_content_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(task_id, content)
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_content_history_task
+    ON scheduled_content_history(task_id, id DESC);
+"""
+
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, SCHEMA),
     (2, OUTBOUND_MESSAGES_SCHEMA),
     (3, GITHUB_DIGEST_SCHEMA),
+    (4, SCHEDULED_CONTENT_HISTORY_SCHEMA),
 )

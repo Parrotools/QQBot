@@ -29,6 +29,8 @@
 | `/memories`、`/memory` | 所有人 | 私聊/群聊 | 查看自己的长期记忆 |
 | `/remind 时间或 cron -- 内容` | 所有人 | 私聊/群聊 | 创建一次性或周期提醒 |
 | `/notify reminder on\|off` | 所有人 | 私聊/群聊 | 开关提醒通知 |
+| `/schedule group:群号 时间或 cron -- 内容` | 仅管理员 | 私聊/群聊 | 创建一次性或周期定时群发 |
+| `/schedule joke group:群号 时间或 cron -- 主题` | 仅管理员 | 私聊/群聊 | 按主题生成不同段子并定时发送 |
 | `/notify github on\|off` | 所有人 | 私聊/群聊 | 开关 GitHub 仓库变化通知 |
 | `/github add\|remove\|list\|check\|info\|watch ...` | 所有人 | 私聊/群聊 | 管理自己的 GitHub 仓库监控 |
 | `/report`、`/日报` | 所有人 | 私聊/群聊 | 查看当天日报 |
@@ -82,6 +84,24 @@
 ```
 
 时间使用 `SCHEDULER_TIMEZONE` 配置的时区，默认是 `Asia/Shanghai`。一次性提醒执行后自动失效，cron 提醒会持续执行。
+
+管理员可以创建定时群发固定消息。群号只能写成 `group:群号`，时间使用 `SCHEDULER_TIMEZONE` 配置的时区：
+
+```
+/schedule group:456789 2030-01-02 08:30 -- 记得参加会议
+/schedule group:456789 cron:0 8 * * * -- 大家早上好
+```
+
+一次性定时群发执行后自动失效，cron 定时群发会持续执行；任务会保存在 SQLite 中，Bot 重启后自动恢复。
+
+如果希望每次定时生成不同内容，可以使用主题段子任务。它会在执行时调用 LLM，并记录最近生成的内容来避免重复：
+
+```
+/schedule joke group:456789 cron:0 12 * * * -- mobile
+/schedule joke group:456789 cron:0 18 * * 1-5 -- 编程冷笑话
+```
+
+第一条会按上海时间每天 12:00 生成一个新的 mobile 主题段子并发送到群里。需要配置可用的 LLM API Key。
 
 ## 3.5 普通用户：GitHub 监控
 

@@ -21,6 +21,6 @@ async def test_connect_adopts_legacy_database_without_losing_data(tmp_path):
     await upgraded.connect()
     try:
         assert (await upgraded.fetch_memories("user-1"))[0]["content"] == "保留的数据"
-        assert await upgraded.migration_versions() == [1, 2, 3]
+        assert await upgraded.migration_versions() == [1, 2, 3, 4]
     finally:
         await upgraded.close()

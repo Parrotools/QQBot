@@ -5,7 +5,13 @@ import pytest
 from app.database.db import Database
 from app.plugins.scheduler import parse_notification_command
 from app.services.notifications import NotificationSettingsService
-from app.services.scheduler import SchedulerService, SchedulerValidationError, parse_reminder_command
+from app.services.scheduler import (
+    SchedulerService,
+    SchedulerValidationError,
+    parse_group_schedule_command,
+    parse_joke_schedule_command,
+    parse_reminder_command,
+)
 
 
 @pytest.fixture
@@ -28,6 +34,20 @@ class FakeDispatcher:
         self.enqueued.append(("user", user_id, message))
         return 1
 
+    async def enqueue_group(self, group_id: str, message: str):
+        self.enqueued.append(("group", group_id, message))
+        return 1
+
+
+class FakeLLM:
+    def __init__(self, responses: list[str]):
+        self.responses = responses
+        self.calls: list[list[dict]] = []
+
+    async def chat(self, messages: list[dict], *, temperature: float = 0.7, max_tokens: int | None = None):
+        self.calls.append(messages)
+        return self.responses.pop(0)
+
 
 def test_parse_one_time_and_cron_reminders():
     run_at, cron_expression, message = parse_reminder_command(
@@ -46,6 +66,39 @@ def test_parse_one_time_and_cron_reminders():
 def test_parse_reminder_rejects_invalid_format():
     with pytest.raises(SchedulerValidationError):
         parse_reminder_command("/remind tomorrow -- 内容")
+
+
+def test_parse_group_schedule_command():
+    group_id, run_at, cron_expression, message = parse_group_schedule_command(
+        "/schedule group:123456 cron:0 8 * * * -- 早上好"
+    )
+    assert group_id == "123456"
+    assert run_at is None
+    assert cron_expression == "0 8 * * *"
+    assert message == "早上好"
+
+    group_id, run_at, cron_expression, message = parse_group_schedule_command(
+        "/schedule group:123456 2030-01-02 08:30 -- 记得开会"
+    )
+    assert group_id == "123456"
+    assert run_at == datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    assert cron_expression is None
+    assert message == "记得开会"
+
+
+def test_parse_group_schedule_rejects_non_group_target():
+    with pytest.raises(SchedulerValidationError, match="group:群号"):
+        parse_group_schedule_command("/schedule user:123 cron:0 8 * * * -- 消息")
+
+
+def test_parse_joke_schedule_command():
+    group_id, run_at, cron_expression, topic = parse_joke_schedule_command(
+        "/schedule joke group:123456 cron:0 12 * * * -- mobile"
+    )
+    assert group_id == "123456"
+    assert run_at is None
+    assert cron_expression == "0 12 * * *"
+    assert topic == "mobile"
 
 
 def test_parse_report_notification_command():
@@ -75,6 +128,39 @@ async def test_create_and_run_one_time_reminder(db):
     row = await db.fetchone("SELECT enabled, last_run FROM scheduled_tasks WHERE id = ?", (task_id,))
     assert row["enabled"] == 0
     assert row["last_run"] is not None
+
+
+async def test_create_and_run_group_message(db):
+    dispatcher = FakeDispatcher()
+    scheduler = SchedulerService(db, dispatcher, timezone_name="UTC")
+    task_id = await scheduler.create_group_message(
+        "admin-1", "30000", "早上好", datetime(2030, 1, 2, 8, 30, tzinfo=UTC)
+    )
+
+    await scheduler.run_task(task_id)
+
+    assert dispatcher.enqueued == [("group", "30000", "早上好")]
+    row = await db.fetchone("SELECT task_type, enabled FROM scheduled_tasks WHERE id = ?", (task_id,))
+    assert row["task_type"] == "group_message"
+    assert row["enabled"] == 0
+
+
+async def test_create_and_run_topic_joke_avoids_history(db):
+    dispatcher = FakeDispatcher()
+    llm = FakeLLM(["昨天的旧段子", "昨天的旧段子", "今天的新段子"])
+    scheduler = SchedulerService(db, dispatcher, timezone_name="UTC", llm=llm)
+    task_id = await scheduler.create_topic_joke(
+        "admin-1", "30000", "mobile", cron_expression="0 12 * * *"
+    )
+    await db.insert_scheduled_content_history(task_id, "昨天的旧段子")
+
+    await scheduler.run_task(task_id)
+
+    assert dispatcher.enqueued == [("group", "30000", "今天的新段子")]
+    assert len(llm.calls) == 3
+    history = await db.fetch_scheduled_content_history(task_id)
+    assert history[:2] == ["今天的新段子", "昨天的旧段子"]
+    assert "昨天的旧段子" in llm.calls[0][1]["content"]
 
 
 async def test_reminder_does_not_send_when_notifications_are_off(db):

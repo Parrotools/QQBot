@@ -108,8 +108,16 @@ async def test_chat_group_meta_commands_require_bot_mention():
 def test_help_text_describes_reminders_and_broadcast_confirmation():
     assert "/remind YYYY-MM-DD HH:MM -- 内容" in HELP_TEXT
     assert "/remind cron:0 6,18 * * * -- 内容" in HELP_TEXT
-    assert "/broadcast user:QQ号1,user:QQ号2 -- 消息" in HELP_TEXT
-    assert "/confirm 发送，/cancel 取消" in HELP_TEXT
+    assert "/schedule group:群号 YYYY-MM-DD HH:MM -- 内容" in HELP_TEXT
+    assert "/schedule group:群号 cron:0 8 * * * -- 内容" in HELP_TEXT
+    assert "/schedule joke group:群号 cron:0 12 * * * -- 主题" in HELP_TEXT
+    assert "/notify reminder|github|report on|off" in HELP_TEXT
+    assert "/github watch <URL> user:QQ号|group:群号" in HELP_TEXT
+    assert "/report 或 /日报" in HELP_TEXT
+    assert "/status 或 /状态" in HELP_TEXT
+    assert "/broadcast user:QQ号,group:群号 -- 消息" in HELP_TEXT
+    assert "/confirm —— 管理员确认执行群发" in HELP_TEXT
+    assert "/cancel —— 管理员取消待确认的群发" in HELP_TEXT
 
 
 # ---------- web_summary 触发规则 ----------
@@ -200,9 +208,13 @@ async def test_group_commands_require_explicit_bot_mention():
     assert await memory_plugin._list_rule(_group_event("/memory", mid=364)) is False
     assert await scheduler_plugin._remind_rule(_group_event("/remind tomorrow -- hi", mid=365)) is False
     assert await scheduler_plugin._notify_rule(_group_event("/notify reminder on", mid=366)) is False
+    assert await scheduler_plugin._schedule_rule(_group_event("/schedule group:30000 cron:0 8 * * * -- hi", mid=369)) is False
 
     assert await admin_plugin._status_trigger(_group_event("/status", at=True, mid=367)) is True
     assert await github_plugin._github_rule(_group_event("/github list", at=True, mid=368)) is True
+    assert await scheduler_plugin._schedule_rule(
+        _group_event("/schedule group:30000 cron:0 8 * * * -- hi", at=True, mid=370)
+    ) is True
 
 
 # ---------- admin 触发规则 ----------

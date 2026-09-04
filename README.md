@@ -8,7 +8,8 @@
 - 多轮上下文会话（SQLite 持久化，群内成员默认独立上下文），`/clear` 清空
 - YAML 可配置人格（默认 Rumi）
 - 用户显式维护的长期记忆，并在聊天时按重要度加载
-- 一次性与 cron 定时提醒（通知默认关闭）
+- 一次性与 cron 定时提醒（通知默认关闭）以及管理员定时群发固定消息
+- 管理员定时按主题生成不同段子并发送到群
 - GitHub 仓库监控：手动检查、commit/Star/Fork/Issue/Release 变化通知
 - 每日日报：汇总 GitHub 变化、任务/提醒和重要记忆，可手动查看
 - 网页总结：识别消息中的 URL，抓取正文，超长网页 Map-Reduce 分块总结；URL 结果进程内缓存（TTL 可配）；可选 Playwright 渲染兜底
@@ -173,6 +174,8 @@ python bot.py
 | SSRF 拒绝 | `/总结 http://127.0.0.1:8080` | "该地址不被允许访问" |
 | 运行状态 | `/status` | 模型、会话数等（不含密钥） |
 | 主动发送（管理员私聊机器人） | `/broadcast user:123456 -- 你好` | 预览 → `/confirm` → 发送并汇报统计 |
+| 定时群发（管理员） | `/schedule group:456789 cron:0 8 * * * -- 大家早上好` | 持久化任务，每天 08:00 自动发到指定群 |
+| 定时主题段子（管理员） | `/schedule joke group:456789 cron:0 12 * * * -- mobile` | 每天 12:00 生成不同的 mobile 主题段子并发送 |
 | 权限拒绝 | 非管理员发 `/broadcast ...` | "该命令仅管理员可用。" |
 | 重复 /broadcast | 管理员连续两次 /broadcast | 只保留最新一条待确认，旧的自动作废 |
 | GitHub 监控 | `/github add https://github.com/owner/repo` | 添加仓库后可手动检查或接收变化通知 |

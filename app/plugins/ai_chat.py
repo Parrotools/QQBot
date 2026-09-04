@@ -20,31 +20,38 @@ CHAT_SYSTEM_PROMPT = load_prompt("chat.txt")
 KNOWN_COMMANDS = {
     "/ai", "/clear", "/总结", "/summary", "/broadcast",
     "/confirm", "/cancel", "/status", "/状态", "/help", "/帮助", "/remember", "/memories", "/memory",
-    "/remind", "/notify", "/report", "/日报",
+    "/remind", "/notify", "/schedule", "/report", "/日报",
 }
 _DELEGATED_COMMANDS = {
     "/总结", "/summary", "/broadcast", "/confirm", "/cancel", "/status", "/状态",
-    "/remember", "/memories", "/memory", "/remind", "/notify", "/github", "/report", "/日报",
+    "/remember", "/memories", "/memory", "/remind", "/notify", "/schedule", "/github", "/report", "/日报",
 }
 
 HELP_TEXT = (
     "可用命令：\n"
-    "/ai <问题> —— 群内向 AI 提问\n"
+    "/ai <问题> —— 进入 AI 对话（私聊或群聊）\n"
     "/clear —— 清空当前会话上下文\n"
-    "/总结 <URL> —— 总结网页（/summary 同义）\n"
-    "/help —— 显示本帮助\n"
-    "/remember [类型] -- 内容 —— 保存长期记忆（/memory、/memories 查看记忆）\n"
+    "/总结 <URL> 或 /summary <URL> —— 总结网页（一次最多 3 个 URL）\n"
+    "/help 或 /帮助 —— 显示本帮助\n"
+    "/remember [类型] -- 内容 —— 保存长期记忆\n"
+    "/memory 或 /memories —— 查看自己的长期记忆\n"
     "/remind YYYY-MM-DD HH:MM -- 内容 —— 创建一次性提醒自己\n"
     "/remind cron:0 6,18 * * * -- 内容 —— 创建每天重复提醒自己\n"
-    "/notify reminder|github on|off —— 开关提醒或 GitHub 通知\n"
-    "/github add|remove|list|check|info|watch —— GitHub 仓库监控\n"
-    "/github watch <URL> user:QQ号 —— 仓库变化时私聊通知该用户\n"
+    "/schedule group:群号 YYYY-MM-DD HH:MM -- 内容 —— 管理员一次性定时发到群\n"
+    "/schedule group:群号 cron:0 8 * * * -- 内容 —— 管理员周期性发到群\n"
+    "/schedule joke group:群号 cron:0 12 * * * -- 主题 —— 管理员定时生成主题段子\n"
+    "/notify reminder|github|report on|off —— 开关提醒、GitHub 或日报通知\n"
+    "/github add|remove|list|check|info —— GitHub 仓库监控\n"
+    "/github watch <URL> user:QQ号|group:群号 —— 仓库变化通知目标\n"
     "/github digest set user:QQ号1,user:QQ号2,group:群号 —— 设置定时汇总目标\n"
     "/github digest list|clear —— 查看或清空定时汇总目标\n"
-    "/report —— 查看今日汇总\n"
+    "/report 或 /日报 —— 查看今日汇总\n"
+    "/status 或 /状态 —— 查看运行状态\n"
+    "/broadcast user:QQ号,group:群号 -- 消息 —— 管理员群发（先预览）\n"
+    "/confirm —— 管理员确认执行群发\n"
+    "/cancel —— 管理员取消待确认的群发\n"
     "群聊命令需先 @Rumi，例如：@Rumi /help；私聊无需 @。\n"
-    "私聊直接发消息即可对话；群里 @我 或回复我也可以。\n"
-    "管理员命令：/broadcast user:QQ号1,user:QQ号2 -- 消息（预览后用 /confirm 发送，/cancel 取消）、/status"
+    "私聊直接发消息即可对话；群里 @我 或回复我也可以。"
 )
 
 # message_id 去重（LRU），防止 OneBot 重复投递导致重复处理

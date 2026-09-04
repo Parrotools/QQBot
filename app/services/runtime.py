@@ -87,7 +87,7 @@ async def init_runtime() -> Runtime:
     github_client = GitHubClient(token=settings.github_token)
     github = GitHubTracker(db, github_client, dispatcher, notifications, timezone_name=settings.scheduler_timezone)
     report = ReportService(db, dispatcher, notifications, timezone_name=settings.scheduler_timezone)
-    scheduler = SchedulerService(db, dispatcher, timezone_name=settings.scheduler_timezone)
+    scheduler = SchedulerService(db, dispatcher, timezone_name=settings.scheduler_timezone, llm=llm)
     scheduler.register_handler("github_check", github.run_scheduled_check)
     scheduler.register_handler("github_digest", github.run_scheduled_digest)
     scheduler.register_handler("daily_report", report.run_scheduled_report)
