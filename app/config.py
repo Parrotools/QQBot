@@ -20,8 +20,12 @@ class Settings(BaseSettings):
     llm_model: str = "glm-4-flash"
     llm_timeout: float = 60.0
     llm_temperature: float = 0.7
-    # 不调用 LLM 的交互回复延迟，模拟自然处理节奏；设为 0 关闭
-    non_llm_reply_delay_seconds: float = 2.0
+    # 不调用 LLM 的交互回复动态延迟：按文本量增长，并在最小/最大值之间限制
+    non_llm_reply_delay_min_seconds: float = 0.5
+    non_llm_reply_delay_max_seconds: float = 4.0
+    non_llm_reply_delay_chars_per_second: float = 35.0
+    # 兼容旧配置：如果设置了 NON_LLM_REPLY_DELAY_SECONDS，将其作为最大延迟；设为 0 关闭
+    non_llm_reply_delay_seconds: float | None = None
 
     # 人格
     personality_file: str = "app/personality/rumi.yaml"
