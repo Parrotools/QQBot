@@ -104,6 +104,7 @@ cp .env.example .env      # Windows: copy .env.example .env
 | `PERSONALITY_FILE` | 人格 YAML 文件路径，默认 `app/personality/rumi.yaml` |
 | `OWNER_QQ_ID` | 主人的真实 QQ 号；只按此 ID 识别主人，不按昵称猜测（留空且只有一个管理员时回退到该 ID） |
 | `OWNER_NAME` | 主人称呼，默认 `Parrotools` |
+| `NON_LLM_REPLY_DELAY_SECONDS` | 不调用 LLM 的交互回复等待秒数，默认 2；设为 0 关闭 |
 
 其余变量（限速、并发、网页大小上限、URL 缓存等）默认值即可运行，详见 `.env.example` 注释。
 

@@ -7,6 +7,7 @@ from nonebot.rule import Rule
 
 from app.plugins.ai_chat import claim_message_id
 from app.services.runtime import get_runtime
+from app.utils import send_local_reply
 
 
 async def _status_trigger(event: MessageEvent) -> bool:
@@ -26,7 +27,7 @@ async def _handle(event: MessageEvent, matcher_: Matcher):
     status = await runtime.health.check()
     counts = status["counts"]
     errors = status["recent_errors"]
-    await matcher_.send(
+    await send_local_reply(matcher_, runtime,
         "qq-llm-bot 运行状态：\n"
         f"运行时间：{status['uptime_seconds']} 秒\n"
         f"LLM：{'正常' if status['llm']['ok'] else '异常'}\n"

@@ -7,6 +7,7 @@ from nonebot.rule import Rule
 from app.plugins.ai_chat import claim_message_id
 from app.services.memory import VALID_MEMORY_TYPES, MemoryValidationError
 from app.services.runtime import get_runtime
+from app.utils import send_local_reply
 
 _REMEMBER = "/remember"
 _LIST_COMMANDS = frozenset({"/memory", "/memories"})
@@ -51,21 +52,23 @@ list_matcher = on_message(rule=Rule(_list_rule), priority=8, block=True)
 
 @remember_matcher.handle()
 async def _handle_remember(event: MessageEvent):
+    runtime = get_runtime()
     try:
         memory_type, content = parse_remember_command(event.message.extract_plain_text())
-        memory_id = await get_runtime().memory.save(str(event.user_id), memory_type, content)
+        memory_id = await runtime.memory.save(str(event.user_id), memory_type, content)
     except MemoryValidationError as e:
-        await remember_matcher.send(f"格式错误：{e}")
+        await send_local_reply(remember_matcher, runtime, f"格式错误：{e}")
         return
-    await remember_matcher.send(f"已保存长期记忆（{memory_type}，编号 {memory_id}）。")
+    await send_local_reply(remember_matcher, runtime, f"已保存长期记忆（{memory_type}，编号 {memory_id}）。")
 
 
 @list_matcher.handle()
 async def _handle_list(event: MessageEvent):
-    memories = await get_runtime().memory.list_for_context(str(event.user_id), limit=20)
+    runtime = get_runtime()
+    memories = await runtime.memory.list_for_context(str(event.user_id), limit=20)
     if not memories:
-        await list_matcher.send("暂时没有长期记忆。")
+        await send_local_reply(list_matcher, runtime, "暂时没有长期记忆。")
         return
     lines = ["你的长期记忆："]
     lines.extend(f"{m['id']}. [{m['type']}] {m['content']}" for m in memories)
-    await list_matcher.send("\n".join(lines))
+    await send_local_reply(list_matcher, runtime, "\n".join(lines))

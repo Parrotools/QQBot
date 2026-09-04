@@ -7,6 +7,7 @@ from nonebot.rule import Rule
 from app.plugins.ai_chat import claim_message_id
 from app.services.report import ReportError
 from app.services.runtime import get_runtime
+from app.utils import send_local_reply
 
 _REPORT_COMMANDS = ("/report", "/日报")
 
@@ -29,9 +30,10 @@ report_matcher = on_message(rule=Rule(_report_rule), priority=6, block=True)
 
 @report_matcher.handle()
 async def _handle_report(event: MessageEvent):
+    runtime = get_runtime()
     try:
-        content = await get_runtime().report.build_daily_report(str(event.user_id))
+        content = await runtime.report.build_daily_report(str(event.user_id))
     except ReportError as e:
-        await report_matcher.send(f"日报生成失败：{e}")
+        await send_local_reply(report_matcher, runtime, f"日报生成失败：{e}")
         return
-    await report_matcher.send(content)
+    await send_local_reply(report_matcher, runtime, content)

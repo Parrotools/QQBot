@@ -8,6 +8,7 @@ from app.plugins.ai_chat import claim_message_id
 from app.services.github.client import GitHubAPIError
 from app.services.github.tracker import GitHubTrackerError, format_check_result, parse_repo_url
 from app.services.runtime import get_runtime
+from app.utils import send_local_reply
 
 _GITHUB = "/github"
 _HELP = (
@@ -49,31 +50,35 @@ async def _handle_github(event: MessageEvent):
             if len(args) != 1:
                 raise GitHubTrackerError(_HELP)
             repo = await runtime.github.add_repository(str(event.user_id), args[0])
-            await github_matcher.send(f'已添加仓库 {repo["repo_owner"]}/{repo["repo_name"]}。')
+            await send_local_reply(github_matcher, runtime, f'已添加仓库 {repo["repo_owner"]}/{repo["repo_name"]}。')
         elif command == "remove":
             if len(args) != 1:
                 raise GitHubTrackerError(_HELP)
             if not await runtime.github.remove_repository(str(event.user_id), args[0]):
                 raise GitHubTrackerError("该仓库尚未添加")
-            await github_matcher.send("已移除仓库。")
+            await send_local_reply(github_matcher, runtime, "已移除仓库。")
         elif command == "list":
             if args:
                 raise GitHubTrackerError(_HELP)
             repos = await runtime.github.list_repositories(str(event.user_id))
             if not repos:
-                await github_matcher.send("你还没有添加 GitHub 仓库。")
+                await send_local_reply(github_matcher, runtime, "你还没有添加 GitHub 仓库。")
                 return
-            await github_matcher.send("\n".join(f'{r["repo_owner"]}/{r["repo_name"]}' for r in repos))
+            await send_local_reply(github_matcher, runtime, "\n".join(f'{r["repo_owner"]}/{r["repo_name"]}' for r in repos))
         elif command == "check":
             if len(args) != 1:
                 raise GitHubTrackerError(_HELP)
-            await github_matcher.send(format_check_result(await runtime.github.check(str(event.user_id), args[0])))
+            await send_local_reply(
+                github_matcher, runtime, format_check_result(await runtime.github.check(str(event.user_id), args[0]))
+            )
         elif command == "info":
             if len(args) != 1:
                 raise GitHubTrackerError(_HELP)
             ref = parse_repo_url(args[0])
             info = await runtime.github_client.get_repository(ref.owner, ref.name)
-            await github_matcher.send(
+            await send_local_reply(
+                github_matcher,
+                runtime,
                 f'{ref.owner}/{ref.name}\n'
                 f'Star：{info.get("stargazers_count", 0)}  Fork：{info.get("forks_count", 0)}\n'
                 f'开放 Issue：{info.get("open_issues_count", 0)}\n{info.get("html_url", ref.url)}'
@@ -83,11 +88,11 @@ async def _handle_github(event: MessageEvent):
                 raise GitHubTrackerError(_HELP)
             target_type = args[1].partition(":")[0]
             if target_type == "group" and not runtime.permission.is_admin(str(event.user_id)):
-                await github_matcher.send("群通知仅管理员可配置。")
+                await send_local_reply(github_matcher, runtime, "群通知仅管理员可配置。")
                 return
             await runtime.github.watch(str(event.user_id), args[0], args[1])
-            await github_matcher.send("GitHub 通知目标已添加。")
+            await send_local_reply(github_matcher, runtime, "GitHub 通知目标已添加。")
         else:
-            await github_matcher.send(_HELP)
+            await send_local_reply(github_matcher, runtime, _HELP)
     except (GitHubTrackerError, GitHubAPIError) as e:
-        await github_matcher.send(f"GitHub 操作失败：{e}")
+        await send_local_reply(github_matcher, runtime, f"GitHub 操作失败：{e}")

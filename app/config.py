@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     llm_model: str = "glm-4-flash"
     llm_timeout: float = 60.0
     llm_temperature: float = 0.7
+    # 不调用 LLM 的交互回复延迟，模拟自然处理节奏；设为 0 关闭
+    non_llm_reply_delay_seconds: float = 2.0
 
     # 人格
     personality_file: str = "app/personality/rumi.yaml"

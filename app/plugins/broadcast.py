@@ -15,6 +15,7 @@ from nonebot.rule import Rule
 from app.plugins.ai_chat import claim_message_id
 from app.services.qq.broadcast_parser import BroadcastFormatError, parse_broadcast_command
 from app.services.runtime import get_runtime
+from app.utils import send_local_reply
 
 _BROADCAST = "/broadcast"
 _CONFIRM = "/confirm"
@@ -57,18 +58,20 @@ async def _handle_broadcast(event: MessageEvent):
     sender_id = str(event.user_id)
 
     if not runtime.permission.is_admin(sender_id):
-        await broadcast_matcher.send("该命令仅管理员可用。")
+        await send_local_reply(broadcast_matcher, runtime, "该命令仅管理员可用。")
         return
 
     text = event.message.extract_plain_text().strip()
     try:
         targets, message = parse_broadcast_command(text)
     except BroadcastFormatError as e:
-        await broadcast_matcher.send(f"格式错误：{e}")
+        await send_local_reply(broadcast_matcher, runtime, f"格式错误：{e}")
         return
 
     if len(targets) > runtime.settings.max_broadcast_recipients:
-        await broadcast_matcher.send(
+        await send_local_reply(
+            broadcast_matcher,
+            runtime,
             f"目标数量 {len(targets)} 超过上限 {runtime.settings.max_broadcast_recipients}，已拒绝。"
         )
         return
@@ -89,11 +92,11 @@ async def _handle_broadcast(event: MessageEvent):
             ttl_seconds=runtime.settings.broadcast_confirm_ttl_seconds,
         )
         logger.info("broadcast 预览创建 pending_id=%s admin=%s targets=%d", pending_id, sender_id, len(targets))
-        await broadcast_matcher.send(preview)
+        await send_local_reply(broadcast_matcher, runtime, preview)
         return
 
     report = await runtime.dispatcher.broadcast(targets, message)
-    await broadcast_matcher.send(report.summary_text())
+    await send_local_reply(broadcast_matcher, runtime, report.summary_text())
 
 
 @confirm_matcher.handle()
@@ -102,17 +105,17 @@ async def _handle_confirm(event: MessageEvent):
     sender_id = str(event.user_id)
 
     if not runtime.permission.is_admin(sender_id):
-        await confirm_matcher.send("该命令仅管理员可用。")
+        await send_local_reply(confirm_matcher, runtime, "该命令仅管理员可用。")
         return
 
     pending = await runtime.db.get_active_pending(sender_id)
     if pending is None:
-        await confirm_matcher.send("没有待确认的群发任务（可能已过期或不存在）。")
+        await send_local_reply(confirm_matcher, runtime, "没有待确认的群发任务（可能已过期或不存在）。")
         return
 
     # 防重复执行：只有成功把状态改为 confirmed 的一方才能发送
     if not await runtime.db.finish_pending(pending["id"], "confirmed"):
-        await confirm_matcher.send("该任务已被处理。")
+        await send_local_reply(confirm_matcher, runtime, "该任务已被处理。")
         return
 
     from app.services.qq.broadcast_parser import parse_targets
@@ -121,12 +124,12 @@ async def _handle_confirm(event: MessageEvent):
         targets = parse_targets(",".join(f"{t['type']}:{t['id']}" for t in pending["targets"]))
     except BroadcastFormatError:
         logger.error("pending_broadcast %s 目标数据损坏", pending["id"])
-        await confirm_matcher.send("任务数据异常，已放弃发送。")
+        await send_local_reply(confirm_matcher, runtime, "任务数据异常，已放弃发送。")
         return
 
     logger.info("broadcast 执行 pending_id=%s admin=%s targets=%d", pending["id"], sender_id, len(targets))
     report = await runtime.dispatcher.broadcast(targets, pending["content"])
-    await confirm_matcher.send(report.summary_text())
+    await send_local_reply(confirm_matcher, runtime, report.summary_text())
 
 
 @cancel_matcher.handle()
@@ -135,13 +138,13 @@ async def _handle_cancel(event: MessageEvent):
     sender_id = str(event.user_id)
 
     if not runtime.permission.is_admin(sender_id):
-        await cancel_matcher.send("该命令仅管理员可用。")
+        await send_local_reply(cancel_matcher, runtime, "该命令仅管理员可用。")
         return
 
     pending = await runtime.db.get_active_pending(sender_id)
     if pending is None:
-        await cancel_matcher.send("没有待取消的群发任务。")
+        await send_local_reply(cancel_matcher, runtime, "没有待取消的群发任务。")
         return
     await runtime.db.finish_pending(pending["id"], "cancelled")
     logger.info("broadcast 取消 pending_id=%s admin=%s", pending["id"], sender_id)
-    await cancel_matcher.send("已取消。")
+    await send_local_reply(cancel_matcher, runtime, "已取消。")

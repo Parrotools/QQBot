@@ -27,7 +27,7 @@ from app.services.web.fetcher import (
     UnsupportedContentTypeError,
 )
 from app.services.web.url_parser import extract_urls
-from app.utils import truncate_for_qq
+from app.utils import send_local_reply, truncate_for_qq
 
 SUMMARY_COMMANDS = ("/总结", "/summary")
 MAX_URLS_PER_MESSAGE = 3
@@ -82,7 +82,7 @@ async def _handle(event: MessageEvent, matcher_: Matcher):
     body = _strip_command(text) if is_command else text
     urls = extract_urls(body) or extract_urls(text)
     if not urls:
-        await matcher_.send("用法：/总结 <网页URL>（可一次给多个，最多同时处理 3 个）")
+        await send_local_reply(matcher_, runtime, "用法：/总结 <网页URL>（可一次给多个，最多同时处理 3 个）")
         return
 
     for url in urls[:MAX_URLS_PER_MESSAGE]:
@@ -107,25 +107,25 @@ async def _fetch_document(runtime: Runtime, url: str):
 async def _summarize_one(matcher_: Matcher, runtime: Runtime, url: str, notice: bool = False) -> None:
     logger.info("网页总结 url=%s", url)
     if notice:
-        await matcher_.send(f"正在读取网页：{url}")
+        await send_local_reply(matcher_, runtime, f"正在读取网页：{url}")
     try:
         async with runtime.web_semaphore:  # 并发限制，防止慢网页拖死 Bot
             doc = await _fetch_document(runtime, url)
             summary = await runtime.summarizer.summarize(doc)
         await matcher_.send(truncate_for_qq(summary))
     except SSRFBlockedError:
-        await matcher_.send("该地址不被允许访问（内网或保留地址）。")
+        await send_local_reply(matcher_, runtime, "该地址不被允许访问（内网或保留地址）。")
     except FetchTimeoutError:
-        await matcher_.send("无法访问该网页：请求超时。")
+        await send_local_reply(matcher_, runtime, "无法访问该网页：请求超时。")
     except PageTooLargeError:
-        await matcher_.send("网页过大，无法处理。")
+        await send_local_reply(matcher_, runtime, "网页过大，无法处理。")
     except UnsupportedContentTypeError:
-        await matcher_.send("该链接不是网页内容，暂不支持。")
+        await send_local_reply(matcher_, runtime, "该链接不是网页内容，暂不支持。")
     except FetchError:
         logger.exception("网页抓取失败 url=%s", url)
-        await matcher_.send("无法访问该网页。")
+        await send_local_reply(matcher_, runtime, "无法访问该网页。")
     except ExtractionError:
-        await matcher_.send("网页可以访问，但没有提取到有效正文。")
+        await send_local_reply(matcher_, runtime, "网页可以访问，但没有提取到有效正文。")
     except LLMError:
         logger.exception("网页总结 LLM 调用失败 url=%s", url)
-        await matcher_.send("AI 服务暂时不可用，请稍后再试。")
+        await send_local_reply(matcher_, runtime, "AI 服务暂时不可用，请稍后再试。")

@@ -11,7 +11,7 @@ from app.promptlib import load_prompt
 from app.services.llm.base import LLMError
 from app.services.runtime import get_runtime
 from app.services.session.manager import SessionManager
-from app.utils import truncate_for_qq
+from app.utils import send_local_reply, truncate_for_qq
 
 CHAT_SYSTEM_PROMPT = load_prompt("chat.txt")
 
@@ -202,24 +202,24 @@ async def _handle(event: MessageEvent):
 
     first_token = text.split(maxsplit=1)[0].lower() if text else ""
     if first_token in ("/help", "/帮助"):
-        await matcher.send(HELP_TEXT)
+        await send_local_reply(matcher, runtime, HELP_TEXT)
         return
     if text.startswith("/") and first_token not in KNOWN_COMMANDS:
-        await matcher.send(f"未知命令 {first_token}。\n\n{HELP_TEXT}")
+        await send_local_reply(matcher, runtime, f"未知命令 {first_token}。\n\n{HELP_TEXT}")
         return
     if text == "/clear":
         await runtime.sessions.clear(session_key)
-        await matcher.send("当前会话已清空。")
+        await send_local_reply(matcher, runtime, "当前会话已清空。")
         return
     if not text:
-        await matcher.send("有什么想问的？直接发消息，或用 /ai <问题>。")
+        await send_local_reply(matcher, runtime, "有什么想问的？直接发消息，或用 /ai <问题>。")
         return
 
     identity_reply = _owner_identity_reply(event, text, runtime)
     if identity_reply is not None:
         await runtime.sessions.append(session_key, "user", text)
         await runtime.sessions.append(session_key, "assistant", identity_reply)
-        await matcher.send(identity_reply)
+        await send_local_reply(matcher, runtime, identity_reply)
         return
 
     history = await runtime.sessions.get_context(session_key)
@@ -260,9 +260,9 @@ async def _handle_meta(event: GroupMessageEvent):
     text = event.message.extract_plain_text().strip()
     if text == "/clear":
         await runtime.sessions.clear(_session_key(event))
-        await meta_matcher.send("当前会话已清空。")
+        await send_local_reply(meta_matcher, runtime, "当前会话已清空。")
     else:
-        await meta_matcher.send(HELP_TEXT)
+        await send_local_reply(meta_matcher, runtime, HELP_TEXT)
 
 
 # 供其他插件复用的去重声明

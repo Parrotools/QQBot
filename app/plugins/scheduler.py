@@ -9,6 +9,7 @@ from nonebot.rule import Rule
 from app.plugins.ai_chat import claim_message_id
 from app.services.runtime import get_runtime
 from app.services.scheduler import SchedulerValidationError, parse_reminder_command
+from app.utils import send_local_reply
 
 _REMIND = "/remind"
 _NOTIFY = "/notify"
@@ -61,24 +62,25 @@ async def _handle_remind(event: MessageEvent):
         )
         settings = await runtime.notifications.get(str(event.user_id))
         if not settings["reminder_notify"]:
-            await remind_matcher.send("提醒通知默认关闭，请先发送 /notify reminder on。")
+            await send_local_reply(remind_matcher, runtime, "提醒通知默认关闭，请先发送 /notify reminder on。")
             return
         task_id = await runtime.scheduler.create_reminder(
             str(event.user_id), message, run_at=run_at, cron_expression=cron_expression
         )
     except (SchedulerValidationError, ValueError) as e:
-        await remind_matcher.send(f"格式错误：{e}")
+        await send_local_reply(remind_matcher, runtime, f"格式错误：{e}")
         return
-    await remind_matcher.send(f"提醒已创建（编号 {task_id}）。")
+    await send_local_reply(remind_matcher, runtime, f"提醒已创建（编号 {task_id}）。")
 
 
 @notify_matcher.handle()
 async def _handle_notify(event: MessageEvent):
+    runtime = get_runtime()
     try:
         field, enabled = parse_notification_command(event.message.extract_plain_text())
-        await get_runtime().notifications.set(str(event.user_id), **{field: enabled})
+        await runtime.notifications.set(str(event.user_id), **{field: enabled})
     except SchedulerValidationError as e:
-        await notify_matcher.send(f"格式错误：{e}")
+        await send_local_reply(notify_matcher, runtime, f"格式错误：{e}")
         return
     labels = {"reminder_notify": "提醒", "github_notify": "GitHub", "daily_report": "日报"}
-    await notify_matcher.send(f"{labels[field]}通知已{'开启' if enabled else '关闭'}。")
+    await send_local_reply(notify_matcher, runtime, f"{labels[field]}通知已{'开启' if enabled else '关闭'}。")
