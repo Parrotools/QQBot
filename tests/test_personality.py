@@ -82,6 +82,24 @@ def test_system_prompt_keeps_runtime_context_out_of_personality_file():
     assert "2261216827" not in prompt
 
 
+def test_owner_identity_is_explicitly_verified_in_system_prompt():
+    path = Path(__file__).parents[1] / "app" / "personality" / "rumi.yaml"
+    manager = PersonalityManager(path)
+
+    owner_prompt = manager.build_system_prompt(
+        "安全底座",
+        context=PersonaContext(relationship="owner", owner_name="Parrotools"),
+    )
+    normal_prompt = manager.build_system_prompt(
+        "安全底座",
+        context=PersonaContext(relationship="normal", owner_name="Parrotools"),
+    )
+
+    assert "已通过配置的 QQ 号核验" in owner_prompt
+    assert "不要说“不认识”“没有存储个人用户信息”" in owner_prompt
+    assert "不是已配置的主人" in normal_prompt
+
+
 def test_personality_requires_name(tmp_path: Path):
     path = tmp_path / "invalid.yaml"
     path.write_text("description: missing name\n", encoding="utf-8")
@@ -213,3 +231,52 @@ async def test_chat_uses_configured_owner_id_and_contextual_sampling(monkeypatch
     assert "mode: technical" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "这代码又炸了"}
     assert kwargs["temperature"] == pytest.approx(0.6)
+
+
+@pytest.mark.asyncio
+async def test_owner_identity_question_uses_verified_identity(monkeypatch):
+    sent: list[str] = []
+
+    class FakeSessions:
+        async def append(self, session_key: str, role: str, content: str) -> None:
+            return None
+
+    class FakeMemory:
+        async def context_prompt(self, user_id: str) -> str:
+            raise AssertionError("身份确认不需要调用记忆服务")
+
+    class FakeLLM:
+        async def chat(self, messages: list[dict], **kwargs) -> str:
+            raise AssertionError("身份确认不应交给 LLM 否认")
+
+    runtime = SimpleNamespace(
+        memory=FakeMemory(),
+        sessions=FakeSessions(),
+        llm=FakeLLM(),
+        settings=SimpleNamespace(
+            group_shared_context=False, llm_temperature=0.7, owner_qq_id="2261216827", owner_name="Parrotools"
+        ),
+    )
+    event = PrivateMessageEvent(
+        time=0,
+        self_id="10000",
+        post_type="message",
+        sub_type="friend",
+        user_id=2261216827,
+        message_type="private",
+        message_id=3,
+        message=Message("你认识我吗？"),
+        raw_message="你认识我吗？",
+        font=0,
+        sender=Sender(user_id=2261216827, nickname="Parrotools"),
+    )
+
+    async def fake_send(message: str):
+        sent.append(message)
+
+    monkeypatch.setattr(ai_chat, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(ai_chat.matcher, "send", fake_send)
+
+    await ai_chat._handle(event)
+
+    assert sent == ["当然认识呀，你是 Parrotools，我的主人。刚才我把“不知道私人细节”和“不认识你”混在一起了，是我说错啦。"]

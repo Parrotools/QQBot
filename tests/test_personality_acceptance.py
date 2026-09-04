@@ -13,6 +13,7 @@ RUMI = PersonalityManager(Path(__file__).parents[1] / "app" / "personality" / "r
     ("relationship", "mode", "user", "expected"),
     [
         ("owner", "casual", "你好", "主人来啦"),
+        ("owner", "casual", "你认识我吗", "身份我记得"),
         ("owner", "casual", "你的主人是谁", "Parrotools"),
         ("owner", "casual", "你能干什么", "/help"),
         ("owner", "casual", "你喜欢干什么", "benchmark"),

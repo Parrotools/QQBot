@@ -54,6 +54,18 @@ _TECHNICAL_HINTS = (
     "```",
 )
 
+_OWNER_IDENTITY_QUESTIONS = (
+    "你认识我吗",
+    "你还认识我吗",
+    "你记得我吗",
+    "你还记得我吗",
+    "你知道我是谁吗",
+    "我是谁",
+    "我是你的主人吗",
+    "你的主人是谁",
+    "谁是你的主人",
+)
+
 
 def _claim(message_id: str) -> bool:
     if message_id in _DEDUP:
@@ -92,6 +104,18 @@ def _persona_context(event: MessageEvent, text: str, runtime) -> PersonaContext:
         sender_name=str(sender_name),
         owner_name=str(getattr(settings, "owner_name", "Parrotools") or "Parrotools"),
     )
+
+
+def _owner_identity_reply(event: MessageEvent, text: str, runtime) -> str | None:
+    """身份问题使用已核验的事件身份回答，不让 LLM 否认确定事实。"""
+    if not _is_owner(event, runtime):
+        return None
+    normalized = "".join(text.lower().split()).rstrip("?？！!。~～")
+    if normalized not in _OWNER_IDENTITY_QUESTIONS:
+        return None
+    owner_name = " ".join(str(getattr(runtime.settings, "owner_name", "") or "Parrotools").split())
+    owner_name = owner_name[:64] or "Parrotools"
+    return f"当然认识呀，你是 {owner_name}，我的主人。刚才我把“不知道私人细节”和“不认识你”混在一起了，是我说错啦。"
 
 
 def _temperature(runtime, mode: str) -> float:
@@ -182,6 +206,13 @@ async def _handle(event: MessageEvent):
         return
     if not text:
         await matcher.send("有什么想问的？直接发消息，或用 /ai <问题>。")
+        return
+
+    identity_reply = _owner_identity_reply(event, text, runtime)
+    if identity_reply is not None:
+        await runtime.sessions.append(session_key, "user", text)
+        await runtime.sessions.append(session_key, "assistant", identity_reply)
+        await matcher.send(identity_reply)
         return
 
     history = await runtime.sessions.get_context(session_key)
