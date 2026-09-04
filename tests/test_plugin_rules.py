@@ -53,6 +53,11 @@ async def test_chat_group_at_triggers():
     assert await chat_trigger(ev) is True
 
 
+async def test_chat_group_at_triggers_without_to_me_flag():
+    ev = _group_event(" 解释一下 Dijkstra", at=True, to_me=False, mid=110)
+    assert await chat_trigger(ev) is True
+
+
 async def test_chat_group_reply_triggers():
     ev = _group_event("那时间复杂度呢", to_me=True, mid=103)
     assert await chat_trigger(ev) is True

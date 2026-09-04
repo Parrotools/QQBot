@@ -108,6 +108,20 @@ def _is_self(event: MessageEvent) -> bool:
     return str(event.user_id) == str(event.self_id)
 
 
+def _is_addressed_to_bot(event: MessageEvent) -> bool:
+    """兼容 OneBot 未填充 to_me 字段的情况，直接检查 @ 和回复对象。"""
+    if bool(getattr(event, "to_me", False)):
+        return True
+    if any(
+        segment.type == "at" and str(segment.data.get("qq")) == str(event.self_id)
+        for segment in event.message
+    ):
+        return True
+    reply = getattr(event, "reply", None)
+    sender = getattr(reply, "sender", None)
+    return str(getattr(sender, "user_id", "")) == str(event.self_id)
+
+
 def _is_owner(event: MessageEvent, runtime) -> bool:
     """只用配置中的 QQ ID 识别主人，昵称、群名片和自述都不参与判断。"""
     configured_owner = getattr(runtime.settings, "owner_id", "")
@@ -208,7 +222,7 @@ async def _trigger(event: MessageEvent) -> bool:
         return False
     if isinstance(event, GroupMessageEvent):
         # 群聊：仅 @机器人 / 回复机器人（to_me）或 "/ai ..." 触发
-        matched = (event.to_me and bool(text)) or text == "/ai" or text.startswith("/ai ")
+        matched = _is_addressed_to_bot(event) or text == "/ai" or text.startswith("/ai ")
     else:
         matched = True  # 私聊默认直接进入 LLM
     if matched:
