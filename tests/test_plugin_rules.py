@@ -15,6 +15,7 @@ from app.plugins import memory as memory_plugin
 from app.plugins import report as report_plugin
 from app.plugins import scheduler as scheduler_plugin
 from app.plugins import web_summary
+from app.plugins.ai_chat import HELP_TEXT
 from app.plugins.ai_chat import _meta_trigger as chat_meta_trigger
 from app.plugins.ai_chat import _trigger as chat_trigger
 
@@ -102,6 +103,13 @@ async def test_chat_ai_prefix_variants():
 async def test_chat_group_meta_commands_require_bot_mention():
     assert await chat_meta_trigger(_group_event("/help", mid=111)) is False
     assert await chat_meta_trigger(_group_event("@Rumi /help", to_me=False, mid=112)) is True
+
+
+def test_help_text_describes_reminders_and_broadcast_confirmation():
+    assert "/remind YYYY-MM-DD HH:MM -- 内容" in HELP_TEXT
+    assert "/remind cron:0 6,18 * * * -- 内容" in HELP_TEXT
+    assert "/broadcast user:QQ号1,user:QQ号2 -- 消息" in HELP_TEXT
+    assert "/confirm 发送，/cancel 取消" in HELP_TEXT
 
 
 # ---------- web_summary 触发规则 ----------

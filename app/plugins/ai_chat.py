@@ -33,15 +33,16 @@ HELP_TEXT = (
     "/clear —— 清空当前会话上下文\n"
     "/总结 <URL> —— 总结网页（/summary 同义）\n"
     "/help —— 显示本帮助\n"
-    "/remember [类型] -- 内容 —— 保存长期记忆\n"
-    "/memories —— 查看我的长期记忆\n"
-    "/remind 时间或 cron -- 内容 —— 创建提醒\n"
+    "/remember [类型] -- 内容 —— 保存长期记忆（/memory、/memories 查看记忆）\n"
+    "/remind YYYY-MM-DD HH:MM -- 内容 —— 创建一次性提醒自己\n"
+    "/remind cron:0 6,18 * * * -- 内容 —— 创建每天重复提醒自己\n"
     "/notify reminder|github on|off —— 开关提醒或 GitHub 通知\n"
     "/github add|remove|list|check|info|watch —— GitHub 仓库监控\n"
+    "/github watch <URL> user:QQ号 —— 仓库变化时私聊通知该用户\n"
     "/report —— 查看今日汇总\n"
     "群聊命令需先 @Rumi，例如：@Rumi /help；私聊无需 @。\n"
     "私聊直接发消息即可对话；群里 @我 或回复我也可以。\n"
-    "管理员额外命令：/broadcast 目标列表 -- 消息、/confirm、/cancel、/status"
+    "管理员命令：/broadcast user:QQ号1,user:QQ号2 -- 消息（预览后用 /confirm 发送，/cancel 取消）、/status"
 )
 
 # message_id 去重（LRU），防止 OneBot 重复投递导致重复处理
