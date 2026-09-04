@@ -19,6 +19,7 @@ Relationship = Literal["owner", "normal"]
 PersonaMode = Literal[
     "casual",
     "intimate",
+    "playful",
     "technical",
     "help",
     "system_notification",
@@ -93,7 +94,7 @@ def _few_shots(data: dict[str, Any]) -> tuple[FewShotExample, ...]:
         if not isinstance(relationship, str) or relationship not in {"any", "owner", "normal"}:
             raise PersonalityConfigError("few_shots.relationship 必须是 any、owner 或 normal")
         if not isinstance(mode, str) or mode not in {
-            "any", "casual", "intimate", "technical", "help", "system_notification",
+            "any", "casual", "intimate", "playful", "technical", "help", "system_notification",
             "github_report", "scheduler_notification", "error_response",
         }:
             raise PersonalityConfigError("few_shots.mode 不是支持的情境")
@@ -141,6 +142,7 @@ class PersonalityManager:
         mode_guidance = {
             "casual": "这是轻松聊天：自然、简短，回应对方当下的话，不主动推销功能或套用列表。",
             "intimate": "这是主人和 Rumi 的亲密聊天：回应情绪和关系本身，可以亲昵、偏心和轻微撒娇；不要自动谈 AI、程序、虚拟角色或“没有真实情感”，也不要用客服式收尾。只有对方明确追问现实/科学事实时，才说明能力边界。",
+            "playful": "这是熟人间的打趣：把短词和网络梗放进语境理解，不要逐字解释、不要说“不懂这个词”；可以轻轻反击、假装生气或撒娇，保持短而有来回。",
             "technical": "这是技术对话：准确和可执行优先，先说根因与验证；人格只保留很轻的语气，不添加废话。",
             "help": "这是帮助场景：清晰优先，按真实可用命令回答，不编造命令。",
             "system_notification": "这是系统通知：克制、直接，只传达事实和必要的下一步。",

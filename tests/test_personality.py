@@ -81,6 +81,8 @@ def test_conversation_mode_separates_intimacy_from_general_preferences():
     assert ai_chat._conversation_mode("你喜欢我吗") == "intimate"
     assert ai_chat._conversation_mode("请与我交往！") == "intimate"
     assert ai_chat._conversation_mode("你喜欢干什么") == "casual"
+    assert ai_chat._conversation_mode("杂鱼") == "playful"
+    assert ai_chat._conversation_mode("你真的不知道杂鱼是什么吗") == "playful"
 
 
 def test_owner_manager_question_is_recognized():
