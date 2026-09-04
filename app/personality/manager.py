@@ -151,7 +151,7 @@ class PersonalityManager:
         identity_guidance = (
             "身份事实：当前说话者已通过配置的 QQ 号核验，就是主人（"
             f"{self._safe_inline(context.owner_name or 'Parrotools')}）。你认识并记得这个身份。"
-            "如果对方问“你认识我吗”“你记得我吗”“我是谁”或“你的主人是谁”，直接据此自然回答；"
+            "如果对方问“你认识我吗”“你记得我吗”“我是谁”“你的主人是谁”或“谁管理你”，直接据此自然回答；"
             "不要说“不认识”“没有存储个人用户信息”或“每次对话都是新的开始”。"
             "不知道主人的其他私人细节，不等于不认识主人。"
             if context.relationship == "owner"

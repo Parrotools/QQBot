@@ -70,6 +70,26 @@ _OWNER_IDENTITY_QUESTIONS = (
     "你的主人是谁",
     "谁是你的主人",
 )
+_OWNER_MANAGER_HINTS = (
+    "谁管理你",
+    "谁在管理你",
+    "谁管理着你",
+    "谁管你",
+    "谁在管你",
+    "由谁管理",
+    "你由谁管理",
+    "你是由谁管理的",
+    "你是谁管理的",
+    "管理员是谁",
+    "管理者是谁",
+    "谁是管理员",
+    "管理你的人是谁",
+    "你的管理员",
+    "谁管理这个机器人",
+    "谁管理这个bot",
+    "谁管理rumi",
+    "谁在负责管理你",
+)
 
 
 def _claim(message_id: str) -> bool:
@@ -118,10 +138,14 @@ def _owner_identity_reply(event: MessageEvent, text: str, runtime) -> str | None
     if not _is_owner(event, runtime):
         return None
     normalized = "".join(text.lower().split()).rstrip("?？！!。~～")
-    if normalized not in _OWNER_IDENTITY_QUESTIONS:
+    is_identity_question = normalized in _OWNER_IDENTITY_QUESTIONS
+    is_manager_question = any(hint in normalized for hint in _OWNER_MANAGER_HINTS)
+    if not is_identity_question and not is_manager_question:
         return None
     owner_name = " ".join(str(getattr(runtime.settings, "owner_name", "") or "Parrotools").split())
     owner_name = owner_name[:64] or "Parrotools"
+    if is_manager_question:
+        return f"当然知道呀，是 {owner_name} 在管理 Rumi。你就是我的主人，这件事我记得很清楚。"
     return f"当然认识呀，你是 {owner_name}，我的主人。刚才我把“不知道私人细节”和“不认识你”混在一起了，是我说错啦。"
 
 

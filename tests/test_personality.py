@@ -70,6 +70,17 @@ def test_conversation_mode_separates_intimacy_from_general_preferences():
     assert ai_chat._conversation_mode("你喜欢干什么") == "casual"
 
 
+def test_owner_manager_question_is_recognized():
+    event = SimpleNamespace(user_id="owner")
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(owner_qq_id="owner", owner_name="Parrotools")
+    )
+
+    assert ai_chat._owner_identity_reply(event, "管理员是谁？", runtime) == (
+        "当然知道呀，是 Parrotools 在管理 Rumi。你就是我的主人，这件事我记得很清楚。"
+    )
+
+
 def test_system_prompt_keeps_runtime_context_out_of_personality_file():
     path = Path(__file__).parents[1] / "app" / "personality" / "rumi.yaml"
     manager = PersonalityManager(path)
