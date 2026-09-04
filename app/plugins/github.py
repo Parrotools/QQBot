@@ -7,6 +7,7 @@ from nonebot.rule import Rule
 from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.github.client import GitHubAPIError
 from app.services.github.tracker import GitHubTrackerError, format_check_result, parse_repo_url
+from app.services.qq.broadcast_parser import BroadcastFormatError, parse_targets
 from app.services.runtime import get_runtime
 from app.utils import send_local_reply
 
@@ -18,7 +19,9 @@ _HELP = (
     "/github list\n"
     "/github check <URL>\n"
     "/github info <URL>\n"
-    "/github watch <URL> user:QQ号|group:群号"
+    "/github watch <URL> user:QQ号|group:群号\n"
+    "/github digest set user:QQ号1,user:QQ号2,group:群号\n"
+    "/github digest list|clear"
 )
 
 
@@ -27,6 +30,23 @@ def parse_github_command(text: str) -> tuple[str, list[str]]:
     if len(parts) < 2 or parts[0].lower() != _GITHUB:
         raise GitHubTrackerError(_HELP)
     return parts[1].lower(), parts[2:]
+
+
+def parse_github_digest_command(args: list[str]) -> tuple[str, list[dict]]:
+    """解析定时汇总目标命令；set 省略时也允许直接跟目标列表。"""
+    if not args:
+        raise GitHubTrackerError(_HELP)
+    action = args[0].lower()
+    if action in {"list", "clear"}:
+        if len(args) != 1:
+            raise GitHubTrackerError(_HELP)
+        return action, []
+    raw_targets = ",".join(args[1:] if action == "set" else args)
+    try:
+        targets = parse_targets(raw_targets)
+    except BroadcastFormatError as e:
+        raise GitHubTrackerError(str(e)) from e
+    return "set", [{"target_type": target.type, "target_id": target.id} for target in targets]
 
 
 async def _github_rule(event: MessageEvent) -> bool:
@@ -94,6 +114,34 @@ async def _handle_github(event: MessageEvent):
                 return
             await runtime.github.watch(str(event.user_id), args[0], args[1])
             await send_local_reply(github_matcher, runtime, "GitHub 通知目标已添加。")
+        elif command == "digest":
+            if not runtime.permission.is_admin(str(event.user_id)):
+                await send_local_reply(github_matcher, runtime, "该命令仅管理员可用。")
+                return
+            action, targets = parse_github_digest_command(args)
+            if action == "list":
+                configured = await runtime.db.fetch_github_digest_targets()
+                if not configured:
+                    await send_local_reply(github_matcher, runtime, "尚未设置 GitHub 定时汇总目标。")
+                    return
+                content = "\n".join(f'{target["target_type"]}:{target["target_id"]}' for target in configured)
+                await send_local_reply(github_matcher, runtime, f"GitHub 定时汇总目标：\n{content}")
+                return
+            if action == "clear":
+                await runtime.db.replace_github_digest_targets([])
+                await runtime.scheduler.sync_system_task("github_digest", "")
+                await send_local_reply(github_matcher, runtime, "GitHub 定时汇总目标已清空，定时发送已关闭。")
+                return
+
+            await runtime.db.replace_github_digest_targets(targets)
+            await runtime.scheduler.sync_system_task("github_digest", runtime.settings.github_digest_cron)
+            content = "\n".join(f'{target["target_type"]}:{target["target_id"]}' for target in targets)
+            await send_local_reply(
+                github_matcher,
+                runtime,
+                f"GitHub 定时汇总目标已更新：\n{content}\n"
+                f"发送时间：{runtime.settings.scheduler_timezone}，cron={runtime.settings.github_digest_cron}",
+            )
         else:
             await send_local_reply(github_matcher, runtime, _HELP)
     except (GitHubTrackerError, GitHubAPIError) as e:

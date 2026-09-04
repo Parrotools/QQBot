@@ -140,4 +140,17 @@ CREATE INDEX IF NOT EXISTS idx_outbound_messages_due
     ON outbound_messages(status, next_attempt_at);
 """
 
-MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA), (2, OUTBOUND_MESSAGES_SCHEMA))
+GITHUB_DIGEST_SCHEMA = """
+CREATE TABLE IF NOT EXISTS github_digest_targets (
+    target_type TEXT NOT NULL CHECK(target_type IN ('user', 'group')),
+    target_id   TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(target_type, target_id)
+);
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (1, SCHEMA),
+    (2, OUTBOUND_MESSAGES_SCHEMA),
+    (3, GITHUB_DIGEST_SCHEMA),
+)

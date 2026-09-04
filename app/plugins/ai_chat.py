@@ -39,6 +39,8 @@ HELP_TEXT = (
     "/notify reminder|github on|off —— 开关提醒或 GitHub 通知\n"
     "/github add|remove|list|check|info|watch —— GitHub 仓库监控\n"
     "/github watch <URL> user:QQ号 —— 仓库变化时私聊通知该用户\n"
+    "/github digest set user:QQ号1,user:QQ号2,group:群号 —— 设置定时汇总目标\n"
+    "/github digest list|clear —— 查看或清空定时汇总目标\n"
     "/report —— 查看今日汇总\n"
     "群聊命令需先 @Rumi，例如：@Rumi /help；私聊无需 @。\n"
     "私聊直接发消息即可对话；群里 @我 或回复我也可以。\n"

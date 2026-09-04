@@ -178,14 +178,26 @@ python bot.py
 | GitHub 监控 | `/github add https://github.com/owner/repo` | 添加仓库后可手动检查或接收变化通知 |
 | 每日日报 | `/report` | 查看当天 GitHub、任务和重要记忆汇总 |
 
-GitHub 定时汇总通过 `.env` 配置。下面的配置会在上海时间每天 06:00 和 18:00，查询全部已登记仓库的最新 commit，并将包含 commit 时间、作者和消息的同一份汇总私发给指定用户：
+GitHub 定时汇总的时间通过 `.env` 配置，收件人和发送群通过管理员命令设置。下面的配置会在上海时间每天 06:00 和 18:00，查询全部已登记仓库的最新 commit，并将包含 commit 时间、作者和消息的同一份汇总发送给指定目标：
 
 ```env
 GITHUB_DIGEST_CRON=0 6,18 * * *
-GITHUB_DIGEST_USER_IDS=123456789,987654321
 ```
 
-`GITHUB_DIGEST_USER_IDS` 为空时不会启用汇总任务；修改 `.env` 后需要重启 Bot。
+设置目标（会替换之前的目标）：
+
+```text
+/github digest set user:123456789,user:987654321,group:456789
+```
+
+查看或清空目标：
+
+```text
+/github digest list
+/github digest clear
+```
+
+只有管理员可以设置目标；清空目标后定时发送会自动关闭。修改 `.env` 中的时间后需要重启 Bot。
 
 主动发送也可以不经聊天窗口，用命令行（需 NapCat 开启 HTTP 服务端，环境变量 `ONEBOT_HTTP_URL` 指向其地址）：
 
@@ -213,7 +225,7 @@ ADMIN_QQ_IDS=111111,222222
 - **敏感数据**：`.env` 已在 `.gitignore`；日志不输出 API Key，网页正文与发送内容截断后入库。
 - **优雅关闭**：Bot 停机时自动释放 LLM/抓取 HTTP 客户端与数据库连接。
 - **GitHub 监控**：使用 `GITHUB_CHECK_CRON` 周期检查；仅用户开启 `/notify github on` 后推送，GitHub Token 不写日志。
-- **GitHub 定时汇总**：使用 `GITHUB_DIGEST_CRON` 周期获取全部已登记仓库的最新 commit，并私发给 `GITHUB_DIGEST_USER_IDS` 中的用户；汇总包含 commit 时间、作者和消息。
+- **GitHub 定时汇总**：使用 `GITHUB_DIGEST_CRON` 周期获取全部已登记仓库的最新 commit，并发送给 `/github digest` 配置的用户或群；汇总包含 commit 时间、作者和消息。
 - **日报**：使用 `DAILY_REPORT_CRON` 触发；仅用户开启 `/notify report on` 后发送，内容写入 `reports` 表。
 
 ## 11. 常见报错

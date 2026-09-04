@@ -258,14 +258,18 @@ async def test_scheduled_digest_sends_latest_commit_to_all_configured_users(db):
         db,
         FakeGitHubClient(_snapshot("latest")),
         dispatcher,
-        digest_user_ids=("999", "888", "999"),
         timezone_name="UTC",
     )
     await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+    await db.replace_github_digest_targets([
+        {"target_type": "user", "target_id": "999"},
+        {"target_type": "group", "target_id": "888"},
+        {"target_type": "user", "target_id": "999"},
+    ])
 
     await tracker.run_scheduled_digest({})
 
-    assert [call[0:2] for call in dispatcher.enqueued] == [("user", "999"), ("user", "888")]
+    assert [call[0:2] for call in dispatcher.enqueued] == [("group", "888"), ("user", "999")]
     assert dispatcher.enqueued[0][2] == dispatcher.enqueued[1][2]
     assert "Last commit 时间：2030-01-01 00:00:00" in dispatcher.enqueued[0][2]
     assert "Last commit 消息：\n  message" in dispatcher.enqueued[0][2]
@@ -276,9 +280,13 @@ def test_format_github_digest_handles_empty_repository_list():
 
 
 def test_parse_github_command():
-    from app.plugins.github import parse_github_command
+    from app.plugins.github import parse_github_command, parse_github_digest_command
 
     assert parse_github_command("/github add https://github.com/OpenAI/openai-python") == (
         "add",
         ["https://github.com/OpenAI/openai-python"],
+    )
+    assert parse_github_digest_command(["set", "user:123,group:456"]) == (
+        "set",
+        [{"target_type": "user", "target_id": "123"}, {"target_type": "group", "target_id": "456"}],
     )

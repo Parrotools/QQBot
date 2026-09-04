@@ -272,6 +272,23 @@ class Database:
             "SELECT * FROM github_repositories WHERE owner_id = ? ORDER BY id", (owner_id,)
         )
 
+    async def fetch_github_digest_targets(self) -> list[dict]:
+        return await self.fetchall(
+            "SELECT target_type, target_id FROM github_digest_targets WHERE enabled = 1 "
+            "ORDER BY target_type, target_id"
+        )
+
+    async def replace_github_digest_targets(self, targets: list[dict]) -> None:
+        await self.conn.execute("DELETE FROM github_digest_targets")
+        unique_targets = dict.fromkeys(
+            (str(target["target_type"]), str(target["target_id"])) for target in targets
+        )
+        await self.conn.executemany(
+            "INSERT INTO github_digest_targets (target_type, target_id, enabled) VALUES (?, ?, 1)",
+            list(unique_targets),
+        )
+        await self.conn.commit()
+
     async def delete_github_repository(self, owner_id: str, repo_owner: str, repo_name: str) -> bool:
         where = (owner_id, repo_owner, repo_name)
         await self.conn.execute(

@@ -85,14 +85,7 @@ async def init_runtime() -> Runtime:
     )
     notifications = NotificationSettingsService(db)
     github_client = GitHubClient(token=settings.github_token)
-    github = GitHubTracker(
-        db,
-        github_client,
-        dispatcher,
-        notifications,
-        digest_user_ids=settings.github_digest_recipient_ids,
-        timezone_name=settings.scheduler_timezone,
-    )
+    github = GitHubTracker(db, github_client, dispatcher, notifications, timezone_name=settings.scheduler_timezone)
     report = ReportService(db, dispatcher, notifications, timezone_name=settings.scheduler_timezone)
     scheduler = SchedulerService(db, dispatcher, timezone_name=settings.scheduler_timezone)
     scheduler.register_handler("github_check", github.run_scheduled_check)
@@ -102,7 +95,7 @@ async def init_runtime() -> Runtime:
         ("github_check", settings.github_check_cron),
         (
             "github_digest",
-            settings.github_digest_cron if settings.github_digest_recipient_ids else "",
+            settings.github_digest_cron if await db.fetch_github_digest_targets() else "",
         ),
         ("daily_report", settings.daily_report_cron),
     ):

@@ -2,7 +2,6 @@
 
 import logging
 import re
-from collections.abc import Iterable
 from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -77,16 +76,12 @@ class GitHubTracker:
         client,
         dispatcher=None,
         notifications=None,
-        digest_user_ids: Iterable[str] | None = None,
         timezone_name: str = "Asia/Shanghai",
     ):
         self._db = db
         self._client = client
         self._dispatcher = dispatcher
         self._notifications = notifications or NotificationSettingsService(db)
-        self._digest_user_ids = tuple(dict.fromkeys(
-            value for value in (str(user_id).strip() for user_id in (digest_user_ids or ())) if value.isdigit()
-        ))
         self._timezone = ZoneInfo(timezone_name)
 
     async def add_repository(self, owner_id: str, url: str) -> dict:
@@ -136,7 +131,8 @@ class GitHubTracker:
         del task
         if self._dispatcher is None:
             raise GitHubTrackerError("GitHub 汇总未配置消息发送器")
-        if not self._digest_user_ids:
+        targets = await self._db.fetch_github_digest_targets()
+        if not targets:
             logger.warning("GitHub 定时汇总未配置收件人，跳过发送")
             return
 
@@ -164,11 +160,14 @@ class GitHubTracker:
             generated_at=datetime.now(self._timezone),
             timezone_info=self._timezone,
         )
-        for user_id in self._digest_user_ids:
+        for target in targets:
+            sender = self._dispatcher.enqueue_user if target["target_type"] == "user" else self._dispatcher.enqueue_group
             try:
-                await self._dispatcher.enqueue_user(user_id, message)
+                await sender(target["target_id"], message)
             except Exception:
-                logger.exception("GitHub 汇总发送失败 user=%s", user_id)
+                logger.exception(
+                    "GitHub 汇总发送失败 target=%s:%s", target["target_type"], target["target_id"]
+                )
 
     async def _check_row(self, repo: dict) -> dict:
         snapshot = await self._client.fetch_snapshot(
