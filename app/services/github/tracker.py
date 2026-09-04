@@ -2,11 +2,15 @@
 
 import logging
 import re
+from collections.abc import Iterable
+from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from app.database.db import Database
 from app.services.github.models import GitHubRepoRef, GitHubSnapshot
 from app.services.notifications import NotificationSettingsService
+from app.utils import truncate_for_qq
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +71,23 @@ def compare_snapshots(previous: dict | None, current: dict | GitHubSnapshot) -> 
 
 
 class GitHubTracker:
-    def __init__(self, db: Database, client, dispatcher=None, notifications=None):
+    def __init__(
+        self,
+        db: Database,
+        client,
+        dispatcher=None,
+        notifications=None,
+        digest_user_ids: Iterable[str] | None = None,
+        timezone_name: str = "Asia/Shanghai",
+    ):
         self._db = db
         self._client = client
         self._dispatcher = dispatcher
         self._notifications = notifications or NotificationSettingsService(db)
+        self._digest_user_ids = tuple(dict.fromkeys(
+            value for value in (str(user_id).strip() for user_id in (digest_user_ids or ())) if value.isdigit()
+        ))
+        self._timezone = ZoneInfo(timezone_name)
 
     async def add_repository(self, owner_id: str, url: str) -> dict:
         owner_id = str(owner_id).strip()
@@ -115,6 +131,45 @@ class GitHubTracker:
                 except Exception:
                     logger.exception("GitHub 通知发送失败 repo_id=%s target=%s:%s", repo["id"], target["target_type"], target["target_id"])
 
+    async def run_scheduled_digest(self, task: dict) -> None:
+        """定时汇总所有仓库的最新 commit，并把同一份消息私发给配置收件人。"""
+        del task
+        if self._dispatcher is None:
+            raise GitHubTrackerError("GitHub 汇总未配置消息发送器")
+        if not self._digest_user_ids:
+            logger.warning("GitHub 定时汇总未配置收件人，跳过发送")
+            return
+
+        items: list[dict] = []
+        failures: list[dict] = []
+        seen_repositories: set[tuple[str, str]] = set()
+        for repo in await self._db.fetch_github_repositories():
+            repository_key = (str(repo["repo_owner"]).lower(), str(repo["repo_name"]).lower())
+            if repository_key in seen_repositories:
+                continue
+            seen_repositories.add(repository_key)
+            try:
+                snapshot = await self._client.fetch_snapshot(
+                    GitHubRepoRef(repo["repo_owner"], repo["repo_name"], repo["repo_url"])
+                )
+            except Exception:
+                logger.exception("GitHub 汇总获取失败 repo_id=%s", repo["id"])
+                failures.append(repo)
+                continue
+            items.append({"repo": repo, "snapshot": snapshot})
+
+        message = format_github_digest(
+            items,
+            failures=failures,
+            generated_at=datetime.now(self._timezone),
+            timezone_info=self._timezone,
+        )
+        for user_id in self._digest_user_ids:
+            try:
+                await self._dispatcher.enqueue_user(user_id, message)
+            except Exception:
+                logger.exception("GitHub 汇总发送失败 user=%s", user_id)
+
     async def _check_row(self, repo: dict) -> dict:
         snapshot = await self._client.fetch_snapshot(
             GitHubRepoRef(repo["repo_owner"], repo["repo_name"], repo["repo_url"])
@@ -155,3 +210,59 @@ def format_check_result(result: dict) -> str:
             labels = {"stars": "Star", "forks": "Fork", "issues": "开放 Issue"}
             lines.append(f'{labels[change["type"]]}：{change["from"]} → {change["to"]}')
     return "\n".join(lines)
+
+
+def format_github_digest(
+    items: list[dict],
+    *,
+    failures: list[dict] | None = None,
+    generated_at: datetime | None = None,
+    timezone_info: tzinfo | None = None,
+) -> str:
+    """格式化定时汇总，包含每个仓库最新 commit 的时间、作者和消息。"""
+    timezone_info = timezone_info or ZoneInfo("Asia/Shanghai")
+    generated_at = generated_at or datetime.now(timezone_info)
+    if generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone_info)
+    generated_at = generated_at.astimezone(timezone_info)
+
+    lines = [
+        f"【GitHub 仓库汇总 {generated_at.strftime('%Y-%m-%d %H:%M')}】",
+        "",
+    ]
+    if not items:
+        lines.append("暂无已登记的 GitHub 仓库。")
+    for index, item in enumerate(items, 1):
+        repo = item["repo"]
+        snapshot: GitHubSnapshot = item["snapshot"]
+        name = f'{repo["repo_owner"]}/{repo["repo_name"]}'
+        lines.append(f"{index}. {name}")
+        if not snapshot.latest_commit_sha:
+            lines.append("Last commit：暂无提交")
+            lines.append("")
+            continue
+        lines.append(f"Last commit 时间：{_format_commit_time(snapshot.latest_commit_time, timezone_info)}")
+        lines.append(f"Last commit 作者：{snapshot.latest_commit_author or 'unknown'}")
+        lines.append("Last commit 消息：")
+        commit_message = snapshot.latest_commit_message.strip() or "（无提交消息）"
+        lines.extend(f"  {line}" for line in commit_message.splitlines())
+        lines.append("")
+
+    if failures:
+        lines.append("获取失败：")
+        lines.extend(f'- {repo["repo_owner"]}/{repo["repo_name"]}' for repo in failures)
+
+    return truncate_for_qq("\n".join(lines).rstrip())
+
+
+def _format_commit_time(value: str, timezone_info: tzinfo) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "未知"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(timezone_info).strftime("%Y-%m-%d %H:%M:%S")

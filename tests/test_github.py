@@ -1,3 +1,5 @@
+from datetime import UTC
+
 import httpx
 import pytest
 
@@ -12,6 +14,7 @@ from app.services.github.tracker import (
     GitHubTracker,
     GitHubTrackerError,
     compare_snapshots,
+    format_github_digest,
     parse_repo_url,
 )
 from app.services.notifications import NotificationSettingsService
@@ -247,6 +250,29 @@ async def test_scheduled_check_sends_only_when_github_notifications_are_enabled(
 
     assert dispatcher.enqueued and dispatcher.enqueued[0][0:2] == ("user", "999")
     assert "OpenAI/openai-python" in dispatcher.enqueued[0][2]
+
+
+async def test_scheduled_digest_sends_latest_commit_to_all_configured_users(db):
+    dispatcher = FakeDispatcher()
+    tracker = GitHubTracker(
+        db,
+        FakeGitHubClient(_snapshot("latest")),
+        dispatcher,
+        digest_user_ids=("999", "888", "999"),
+        timezone_name="UTC",
+    )
+    await tracker.add_repository("user-1", "https://github.com/OpenAI/openai-python")
+
+    await tracker.run_scheduled_digest({})
+
+    assert [call[0:2] for call in dispatcher.enqueued] == [("user", "999"), ("user", "888")]
+    assert dispatcher.enqueued[0][2] == dispatcher.enqueued[1][2]
+    assert "Last commit 时间：2030-01-01 00:00:00" in dispatcher.enqueued[0][2]
+    assert "Last commit 消息：\n  message" in dispatcher.enqueued[0][2]
+
+
+def test_format_github_digest_handles_empty_repository_list():
+    assert "暂无已登记的 GitHub 仓库" in format_github_digest([], timezone_info=UTC)
 
 
 def test_parse_github_command():

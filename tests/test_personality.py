@@ -77,6 +77,11 @@ def test_owner_identity_prefers_explicit_id_and_supports_single_admin_fallback()
     assert Settings(owner_qq_id="", admin_qq_ids="one,two").owner_id == ""
 
 
+def test_github_digest_recipient_ids_are_deduplicated_and_validate_numeric_ids():
+    settings = Settings(_env_file=None, github_digest_user_ids="123, 456,123,invalid")
+    assert settings.github_digest_recipient_ids == ("123", "456")
+
+
 def test_conversation_mode_separates_intimacy_from_general_preferences():
     assert ai_chat._conversation_mode("你喜欢我吗") == "intimate"
     assert ai_chat._conversation_mode("请与我交往！") == "intimate"

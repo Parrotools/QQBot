@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     scheduler_timezone: str = "Asia/Shanghai"
     github_token: str = ""
     github_check_cron: str = "0 * * * *"
+    github_digest_cron: str = "0 6,18 * * *"
+    github_digest_user_ids: str = ""
     daily_report_cron: str = "0 23 * * *"
 
     # 数据 / 日志
@@ -84,6 +86,13 @@ class Settings(BaseSettings):
         # 兼容只有一个管理员的既有部署；多个管理员时必须显式配置 OWNER_QQ_ID。
         admin_ids = self.admin_ids
         return next(iter(admin_ids), "") if len(admin_ids) == 1 else ""
+
+    @property
+    def github_digest_recipient_ids(self) -> tuple[str, ...]:
+        """返回去重后的合法 GitHub 汇总私聊收件人。"""
+        return tuple(dict.fromkeys(
+            value.strip() for value in self.github_digest_user_ids.split(",") if value.strip().isdigit()
+        ))
 
 
 @lru_cache
