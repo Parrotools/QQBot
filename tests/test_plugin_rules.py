@@ -101,6 +101,13 @@ async def test_summary_private_url_auto(monkeypatch):
     assert await web_summary._trigger(_private_event("看看这个 https://example.com/a", mid=203)) is True
 
 
+async def test_summary_does_not_steal_other_slash_commands_with_urls(monkeypatch):
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(
+        _private_event("/github add https://github.com/OpenAI/openai-python", mid=204)
+    ) is False
+
+
 async def test_summary_group_url_requires_at(monkeypatch):
     """场景 5：@机器人 + URL 自动总结；未 @ 不自动。"""
     _patch_mode(monkeypatch, "mentioned")

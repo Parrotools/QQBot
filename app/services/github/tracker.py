@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+_MARKDOWN_LINK_PATTERN = re.compile(r"^\[[^\]]+\]\((https://[^)]+)\)$")
 
 
 class GitHubTrackerError(ValueError):
@@ -19,7 +20,11 @@ class GitHubTrackerError(ValueError):
 
 
 def parse_repo_url(url: str) -> GitHubRepoRef:
-    parsed = urlparse(str(url).strip())
+    value = str(url).strip()
+    markdown_link = _MARKDOWN_LINK_PATTERN.fullmatch(value)
+    if markdown_link:
+        value = markdown_link.group(1)
+    parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in _GITHUB_HOSTS:
         raise GitHubTrackerError("只支持 https://github.com/owner/repo 格式")
     parts = [part for part in parsed.path.split("/") if part]

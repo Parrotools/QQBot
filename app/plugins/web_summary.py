@@ -49,6 +49,9 @@ async def _trigger(event: MessageEvent) -> bool:
         return False
     text = event.message.extract_plain_text().strip()
     is_command = any(text.startswith(cmd) for cmd in SUMMARY_COMMANDS)
+    # 其他斜杠命令（例如 /github add <URL>）交给对应命令插件，不能被 URL 自动总结抢走。
+    if text.startswith("/") and not is_command:
+        return False
     mode = get_runtime().settings.url_auto_summary_mode
 
     if is_command:

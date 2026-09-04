@@ -38,6 +38,14 @@ def test_parse_repo_url_rejects_non_github_url():
         parse_repo_url("https://example.com/OpenAI/openai-python")
 
 
+def test_parse_repo_url_accepts_markdown_link():
+    ref = parse_repo_url("[https://github.com/AstrBotDevs/AstrBot.git](https://github.com/AstrBotDevs/AstrBot.git)")
+
+    assert ref.owner == "AstrBotDevs"
+    assert ref.name == "AstrBot"
+    assert ref.url == "https://github.com/AstrBotDevs/AstrBot"
+
+
 def test_parse_github_api_payload():
     snapshot = parse_snapshot_payload(
         {
