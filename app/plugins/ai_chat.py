@@ -1,5 +1,6 @@
 """AI 聊天插件：私聊直接进入 LLM；群聊仅 @机器人 或 /ai 触发；/clear 清空会话。"""
 
+import re
 from collections import OrderedDict
 
 from nonebot import logger, on_message
@@ -61,6 +62,7 @@ _INTIMATE_HINTS = (
 _PLAYFUL_HINTS = (
     "杂鱼", "笨蛋", "笨猫", "小笨蛋", "菜狗", "菜鸡",
 )
+_BOT_NICKNAMES = ("rumi",)
 
 _OWNER_IDENTITY_QUESTIONS = (
     "你认识我吗",
@@ -109,17 +111,27 @@ def _is_self(event: MessageEvent) -> bool:
 
 
 def _is_addressed_to_bot(event: MessageEvent) -> bool:
-    """兼容 OneBot 未填充 to_me 字段的情况，直接检查 @ 和回复对象。"""
+    """兼容 OneBot 未填充 to_me 或把 @ 昵称当普通文本上报的情况。"""
     if bool(getattr(event, "to_me", False)):
         return True
-    if any(
-        segment.type == "at" and str(segment.data.get("qq")) == str(event.self_id)
-        for segment in event.message
-    ):
-        return True
+    for message in (getattr(event, "message", None), getattr(event, "original_message", None)):
+        if message is not None and any(
+            segment.type == "at" and str(segment.data.get("qq")) == str(event.self_id)
+            for segment in message
+        ):
+            return True
     reply = getattr(event, "reply", None)
     sender = getattr(reply, "sender", None)
-    return str(getattr(sender, "user_id", "")) == str(event.self_id)
+    if str(getattr(sender, "user_id", "")) == str(event.self_id):
+        return True
+
+    # 部分 NapCat/QQ 消息会把“@Rumi hello”作为文本而不是 at segment 上报。
+    candidates = (
+        str(getattr(event, "raw_message", "")),
+        event.message.extract_plain_text() if getattr(event, "message", None) is not None else "",
+    )
+    nickname_pattern = "|".join(re.escape(name) for name in _BOT_NICKNAMES)
+    return any(re.match(rf"^\s*@(?:{nickname_pattern})(?:\s|$)", text, re.IGNORECASE) for text in candidates)
 
 
 def _is_owner(event: MessageEvent, runtime) -> bool:

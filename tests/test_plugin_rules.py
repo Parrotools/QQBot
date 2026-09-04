@@ -58,6 +58,12 @@ async def test_chat_group_at_triggers_without_to_me_flag():
     assert await chat_trigger(ev) is True
 
 
+async def test_chat_group_textual_bot_nickname_triggers():
+    ev = _group_event("@Rumi hello", at=False, to_me=False, mid=111)
+    assert await chat_trigger(ev) is True
+    assert await chat_trigger(_group_event("@Rume hello", at=False, to_me=False, mid=112)) is False
+
+
 async def test_chat_group_reply_triggers():
     ev = _group_event("那时间复杂度呢", to_me=True, mid=103)
     assert await chat_trigger(ev) is True
