@@ -54,6 +54,11 @@ _TECHNICAL_HINTS = (
     "```",
 )
 
+_INTIMATE_HINTS = (
+    "喜欢我", "喜欢你", "爱我", "爱你", "想我", "想你", "交往", "在一起", "约会", "表白", "告白",
+    "男朋友", "女朋友", "对象", "抱抱", "亲亲", "亲一下", "陪我睡", "想和你",
+)
+
 _OWNER_IDENTITY_QUESTIONS = (
     "你认识我吗",
     "你还认识我吗",
@@ -90,6 +95,8 @@ def _is_owner(event: MessageEvent, runtime) -> bool:
 
 def _conversation_mode(text: str) -> str:
     lowered = text.lower()
+    if any(hint in lowered for hint in _INTIMATE_HINTS):
+        return "intimate"
     return "technical" if any(hint in lowered for hint in _TECHNICAL_HINTS) else "casual"
 
 
@@ -122,7 +129,7 @@ def _temperature(runtime, mode: str) -> float:
     """给闲聊一点表达空间，技术问答收窄随机性；不改变 provider 的接口契约。"""
     base = float(getattr(runtime.settings, "llm_temperature", 0.7))
     base = max(0.0, min(2.0, base))
-    delta = 0.1 if mode == "casual" else -0.1
+    delta = 0.1 if mode in {"casual", "intimate"} else -0.1
     return max(0.0, min(2.0, base + delta))
 
 

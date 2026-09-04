@@ -64,6 +64,12 @@ def test_owner_identity_prefers_explicit_id_and_supports_single_admin_fallback()
     assert Settings(owner_qq_id="", admin_qq_ids="one,two").owner_id == ""
 
 
+def test_conversation_mode_separates_intimacy_from_general_preferences():
+    assert ai_chat._conversation_mode("你喜欢我吗") == "intimate"
+    assert ai_chat._conversation_mode("请与我交往！") == "intimate"
+    assert ai_chat._conversation_mode("你喜欢干什么") == "casual"
+
+
 def test_system_prompt_keeps_runtime_context_out_of_personality_file():
     path = Path(__file__).parents[1] / "app" / "personality" / "rumi.yaml"
     manager = PersonalityManager(path)
@@ -98,6 +104,17 @@ def test_owner_identity_is_explicitly_verified_in_system_prompt():
     assert "已通过配置的 QQ 号核验" in owner_prompt
     assert "不要说“不认识”“没有存储个人用户信息”" in owner_prompt
     assert "不是已配置的主人" in normal_prompt
+
+
+def test_intimate_mode_has_relationship_first_guidance():
+    path = Path(__file__).parents[1] / "app" / "personality" / "rumi.yaml"
+    prompt = PersonalityManager(path).build_system_prompt(
+        "安全底座",
+        context=PersonaContext(relationship="owner", mode="intimate"),  # type: ignore[arg-type]
+    )
+
+    assert "这是主人和 Rumi 的亲密聊天" in prompt
+    assert "不要自动谈 AI、程序、虚拟角色" in prompt
 
 
 def test_personality_requires_name(tmp_path: Path):
