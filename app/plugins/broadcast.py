@@ -12,7 +12,7 @@ from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.qq.broadcast_parser import BroadcastFormatError, parse_broadcast_command
 from app.services.runtime import get_runtime
 from app.utils import send_local_reply
@@ -25,7 +25,9 @@ _CANCEL = "/cancel"
 async def _broadcast_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    text = event.message.extract_plain_text().strip()
+    if not command_is_addressed(event):
+        return False
+    text = strip_bot_mention(event.message.extract_plain_text())
     if text.lower().startswith(_BROADCAST):
         return claim_message_id(str(event.message_id))
     return False
@@ -34,7 +36,7 @@ async def _broadcast_rule(event: MessageEvent) -> bool:
 async def _confirm_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if event.message.extract_plain_text().strip() == _CONFIRM:
+    if command_is_addressed(event) and strip_bot_mention(event.message.extract_plain_text()) == _CONFIRM:
         return claim_message_id(str(event.message_id))
     return False
 
@@ -42,7 +44,7 @@ async def _confirm_rule(event: MessageEvent) -> bool:
 async def _cancel_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if event.message.extract_plain_text().strip() == _CANCEL:
+    if command_is_addressed(event) and strip_bot_mention(event.message.extract_plain_text()) == _CANCEL:
         return claim_message_id(str(event.message_id))
     return False
 
@@ -61,7 +63,7 @@ async def _handle_broadcast(event: MessageEvent):
         await send_local_reply(broadcast_matcher, runtime, "该命令仅管理员可用。")
         return
 
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
     try:
         targets, message = parse_broadcast_command(text)
     except BroadcastFormatError as e:

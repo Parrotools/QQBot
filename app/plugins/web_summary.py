@@ -15,7 +15,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent, Private
 from nonebot.matcher import Matcher
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.security.ssrf import SSRFBlockedError
 from app.services.llm.base import LLMError
 from app.services.runtime import Runtime, get_runtime
@@ -47,8 +47,10 @@ def _is_self(event: MessageEvent) -> bool:
 async def _trigger(event: MessageEvent) -> bool:
     if _is_self(event):
         return False
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
     is_command = any(text.startswith(cmd) for cmd in SUMMARY_COMMANDS)
+    if isinstance(event, GroupMessageEvent) and is_command and not command_is_addressed(event):
+        return False
     # 其他斜杠命令（例如 /github add <URL>）交给对应命令插件，不能被 URL 自动总结抢走。
     if text.startswith("/") and not is_command:
         return False
@@ -79,7 +81,7 @@ matcher = on_message(rule=Rule(_trigger), priority=6, block=True)
 @matcher.handle()
 async def _handle(event: MessageEvent, matcher_: Matcher):
     runtime = get_runtime()
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
 
     is_command = any(text.startswith(cmd) for cmd in SUMMARY_COMMANDS)
     body = _strip_command(text) if is_command else text

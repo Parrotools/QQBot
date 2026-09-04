@@ -1,4 +1,4 @@
-"""AI 聊天插件：私聊直接进入 LLM；群聊仅 @机器人 或 /ai 触发；/clear 清空会话。"""
+"""AI 聊天插件：私聊直接进入 LLM；群聊仅 @机器人触发；命令需带 / 前缀。"""
 
 import re
 from collections import OrderedDict
@@ -39,6 +39,7 @@ HELP_TEXT = (
     "/notify reminder|github on|off —— 开关提醒或 GitHub 通知\n"
     "/github add|remove|list|check|info|watch —— GitHub 仓库监控\n"
     "/report —— 查看今日汇总\n"
+    "群聊命令需先 @Rumi，例如：@Rumi /help；私聊无需 @。\n"
     "私聊直接发消息即可对话；群里 @我 或回复我也可以。\n"
     "管理员额外命令：/broadcast 目标列表 -- 消息、/confirm、/cancel、/status"
 )
@@ -110,21 +111,14 @@ def _is_self(event: MessageEvent) -> bool:
     return str(event.user_id) == str(event.self_id)
 
 
-def _is_addressed_to_bot(event: MessageEvent) -> bool:
-    """兼容 OneBot 未填充 to_me 或把 @ 昵称当普通文本上报的情况。"""
-    if bool(getattr(event, "to_me", False)):
-        return True
+def _has_bot_mention(event: MessageEvent) -> bool:
+    """判断消息中是否确实出现了机器人的 @，兼容 OneBot 的两种上报形式。"""
     for message in (getattr(event, "message", None), getattr(event, "original_message", None)):
         if message is not None and any(
             segment.type == "at" and str(segment.data.get("qq")) == str(event.self_id)
             for segment in message
         ):
             return True
-    reply = getattr(event, "reply", None)
-    sender = getattr(reply, "sender", None)
-    if str(getattr(sender, "user_id", "")) == str(event.self_id):
-        return True
-
     # 部分 NapCat/QQ 消息会把“@Rumi hello”作为文本而不是 at segment 上报。
     candidates = (
         str(getattr(event, "raw_message", "")),
@@ -132,6 +126,26 @@ def _is_addressed_to_bot(event: MessageEvent) -> bool:
     )
     nickname_pattern = "|".join(re.escape(name) for name in _BOT_NICKNAMES)
     return any(re.match(rf"^\s*@(?:{nickname_pattern})(?:\s|$)", text, re.IGNORECASE) for text in candidates)
+
+
+def _is_addressed_to_bot(event: MessageEvent) -> bool:
+    """判断群消息是否直接发给机器人，包含 @、回复和 OneBot 的 to_me 标记。"""
+    if bool(getattr(event, "to_me", False)) or _has_bot_mention(event):
+        return True
+    reply = getattr(event, "reply", None)
+    sender = getattr(reply, "sender", None)
+    return str(getattr(sender, "user_id", "")) == str(event.self_id)
+
+
+def command_is_addressed(event: MessageEvent) -> bool:
+    """群聊命令必须显式 @ 机器人；私聊命令无需 @。"""
+    return not isinstance(event, GroupMessageEvent) or _has_bot_mention(event)
+
+
+def strip_bot_mention(text: str) -> str:
+    """去掉文本形式的开头 @Rumi；标准 at segment 的纯文本本来就不含它。"""
+    nickname_pattern = "|".join(re.escape(name) for name in _BOT_NICKNAMES)
+    return re.sub(rf"^\s*@(?:{nickname_pattern})(?:\s+|$)", "", text, count=1, flags=re.IGNORECASE).strip()
 
 
 def _is_owner(event: MessageEvent, runtime) -> bool:
@@ -228,13 +242,13 @@ def _session_key(event: MessageEvent) -> str:
 async def _trigger(event: MessageEvent) -> bool:
     if _is_self(event):
         return False  # 过滤自己的消息，防循环
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
     first_token = text.split(maxsplit=1)[0].lower() if text else ""
     if first_token in _DELEGATED_COMMANDS:
         return False
     if isinstance(event, GroupMessageEvent):
         # 群聊：仅 @机器人 / 回复机器人（to_me）或 "/ai ..." 触发
-        matched = _is_addressed_to_bot(event) or text == "/ai" or text.startswith("/ai ")
+        matched = _is_addressed_to_bot(event)
     else:
         matched = True  # 私聊默认直接进入 LLM
     if matched:
@@ -249,7 +263,7 @@ matcher = on_message(rule=Rule(_trigger), priority=10, block=True)
 async def _handle(event: MessageEvent):
     runtime = get_runtime()
     session_key = _session_key(event)
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
 
     # 私聊与群聊统一支持 /ai 前缀
     if text == "/ai" or text.startswith("/ai "):
@@ -296,11 +310,13 @@ async def _handle(event: MessageEvent):
     await matcher.send(truncate_for_qq(reply))
 
 
-# 群聊免 @ 的轻量命令：/clear、/help
+# 群聊轻量命令：/clear、/help 也必须 @ 机器人
 async def _meta_trigger(event: GroupMessageEvent) -> bool:
     if _is_self(event):
         return False
-    text = event.message.extract_plain_text().strip()
+    if not _is_addressed_to_bot(event):
+        return False
+    text = strip_bot_mention(event.message.extract_plain_text())
     if text in ("/clear", "/help", "/帮助"):
         return _claim(str(event.message_id))
     return False
@@ -312,7 +328,7 @@ meta_matcher = on_message(rule=Rule(_meta_trigger), priority=9, block=True)
 @meta_matcher.handle()
 async def _handle_meta(event: GroupMessageEvent):
     runtime = get_runtime()
-    text = event.message.extract_plain_text().strip()
+    text = strip_bot_mention(event.message.extract_plain_text())
     if text == "/clear":
         await runtime.sessions.clear(_session_key(event))
         await send_local_reply(meta_matcher, runtime, "当前会话已清空。")

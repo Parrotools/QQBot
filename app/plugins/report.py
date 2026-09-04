@@ -4,7 +4,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.report import ReportError
 from app.services.runtime import get_runtime
 from app.utils import send_local_reply
@@ -20,7 +20,9 @@ def parse_report_command(text: str) -> bool:
 async def _report_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if parse_report_command(event.message.extract_plain_text()):
+    if not command_is_addressed(event):
+        return False
+    if parse_report_command(strip_bot_mention(event.message.extract_plain_text())):
         return claim_message_id(str(event.message_id))
     return False
 

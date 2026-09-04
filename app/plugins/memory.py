@@ -4,7 +4,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.memory import VALID_MEMORY_TYPES, MemoryValidationError
 from app.services.runtime import get_runtime
 from app.utils import send_local_reply
@@ -32,7 +32,9 @@ def parse_remember_command(text: str) -> tuple[str, str]:
 async def _remember_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    text = event.message.extract_plain_text().strip().lower()
+    if not command_is_addressed(event):
+        return False
+    text = strip_bot_mention(event.message.extract_plain_text()).lower()
     if text == _REMEMBER or text.startswith(f"{_REMEMBER} "):
         return claim_message_id(str(event.message_id))
     return False
@@ -41,7 +43,9 @@ async def _remember_rule(event: MessageEvent) -> bool:
 async def _list_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if event.message.extract_plain_text().strip().lower() in _LIST_COMMANDS:
+    if not command_is_addressed(event):
+        return False
+    if strip_bot_mention(event.message.extract_plain_text()).lower() in _LIST_COMMANDS:
         return claim_message_id(str(event.message_id))
     return False
 
@@ -54,7 +58,7 @@ list_matcher = on_message(rule=Rule(_list_rule), priority=8, block=True)
 async def _handle_remember(event: MessageEvent):
     runtime = get_runtime()
     try:
-        memory_type, content = parse_remember_command(event.message.extract_plain_text())
+        memory_type, content = parse_remember_command(strip_bot_mention(event.message.extract_plain_text()))
         memory_id = await runtime.memory.save(str(event.user_id), memory_type, content)
     except MemoryValidationError as e:
         await send_local_reply(remember_matcher, runtime, f"格式错误：{e}")

@@ -4,7 +4,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.github.client import GitHubAPIError
 from app.services.github.tracker import GitHubTrackerError, format_check_result, parse_repo_url
 from app.services.runtime import get_runtime
@@ -32,7 +32,9 @@ def parse_github_command(text: str) -> tuple[str, list[str]]:
 async def _github_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    text = event.message.extract_plain_text().strip()
+    if not command_is_addressed(event):
+        return False
+    text = strip_bot_mention(event.message.extract_plain_text())
     if text.lower() == _GITHUB or text.lower().startswith(f"{_GITHUB} "):
         return claim_message_id(str(event.message_id))
     return False
@@ -45,7 +47,7 @@ github_matcher = on_message(rule=Rule(_github_rule), priority=6, block=True)
 async def _handle_github(event: MessageEvent):
     runtime = get_runtime()
     try:
-        command, args = parse_github_command(event.message.extract_plain_text())
+        command, args = parse_github_command(strip_bot_mention(event.message.extract_plain_text()))
         if command == "add":
             if len(args) != 1:
                 raise GitHubTrackerError(_HELP)

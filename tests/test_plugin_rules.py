@@ -11,8 +11,11 @@ from nonebot.adapters.onebot.v11.event import Sender
 from app.plugins import admin as admin_plugin
 from app.plugins import broadcast as broadcast_plugin
 from app.plugins import github as github_plugin
+from app.plugins import memory as memory_plugin
 from app.plugins import report as report_plugin
+from app.plugins import scheduler as scheduler_plugin
 from app.plugins import web_summary
+from app.plugins.ai_chat import _meta_trigger as chat_meta_trigger
 from app.plugins.ai_chat import _trigger as chat_trigger
 
 SELF_ID = "10000"
@@ -74,8 +77,9 @@ async def test_chat_group_plain_message_ignored():
     assert await chat_trigger(_group_event("今天晚上吃什么", mid=104)) is False
 
 
-async def test_chat_group_ai_command_without_at():
-    assert await chat_trigger(_group_event("/ai 写个俳句", mid=105)) is True
+async def test_chat_group_ai_command_requires_at():
+    assert await chat_trigger(_group_event("/ai 写个俳句", mid=105)) is False
+    assert await chat_trigger(_group_event("写个俳句", at=True, mid=106)) is True
 
 
 async def test_chat_self_message_ignored():
@@ -91,7 +95,13 @@ async def test_chat_message_id_dedup():
 
 async def test_chat_ai_prefix_variants():
     assert await chat_trigger(_group_event("/airplane 模型", mid=108)) is False  # 不误匹配
-    assert await chat_trigger(_group_event("/ai", mid=109)) is True
+    assert await chat_trigger(_group_event("/ai", mid=109)) is False
+    assert await chat_trigger(_group_event("/ai", at=True, mid=113)) is True
+
+
+async def test_chat_group_meta_commands_require_bot_mention():
+    assert await chat_meta_trigger(_group_event("/help", mid=111)) is False
+    assert await chat_meta_trigger(_group_event("@Rumi /help", to_me=False, mid=112)) is True
 
 
 # ---------- web_summary 触发规则 ----------
@@ -104,12 +114,13 @@ def _patch_mode(monkeypatch, mode: str) -> None:
 async def test_summary_command_always_triggers(monkeypatch):
     _patch_mode(monkeypatch, "mentioned")
     assert await web_summary._trigger(_private_event("/总结", mid=201)) is True  # 无 URL 也接住
-    assert await web_summary._trigger(_group_event("/总结 https://example.com/a", at=True, mid=202)) is True
+    assert await web_summary._trigger(_group_event("/总结 https://example.com/a", mid=202)) is False
+    assert await web_summary._trigger(_group_event("/总结 https://example.com/a", at=True, mid=203)) is True
 
 
 async def test_summary_private_url_auto(monkeypatch):
     _patch_mode(monkeypatch, "mentioned")
-    assert await web_summary._trigger(_private_event("看看这个 https://example.com/a", mid=203)) is True
+    assert await web_summary._trigger(_private_event("看看这个 https://example.com/a", mid=214)) is True
 
 
 async def test_summary_does_not_steal_other_slash_commands_with_urls(monkeypatch):
@@ -171,6 +182,19 @@ async def test_deterministic_private_commands_are_delegated_from_chat():
     assert await chat_trigger(_private_event("/report", mid=351)) is False
     assert await github_plugin._github_rule(_private_event("/github list", mid=352)) is True
     assert await report_plugin._report_rule(_private_event("/report", mid=353)) is True
+
+
+async def test_group_commands_require_explicit_bot_mention():
+    assert await admin_plugin._status_trigger(_group_event("/status", mid=360)) is False
+    assert await broadcast_plugin._broadcast_rule(_group_event("/broadcast user:123 -- hi", mid=361)) is False
+    assert await github_plugin._github_rule(_group_event("/github list", mid=362)) is False
+    assert await memory_plugin._remember_rule(_group_event("/remember 这是事实", mid=363)) is False
+    assert await memory_plugin._list_rule(_group_event("/memory", mid=364)) is False
+    assert await scheduler_plugin._remind_rule(_group_event("/remind tomorrow -- hi", mid=365)) is False
+    assert await scheduler_plugin._notify_rule(_group_event("/notify reminder on", mid=366)) is False
+
+    assert await admin_plugin._status_trigger(_group_event("/status", at=True, mid=367)) is True
+    assert await github_plugin._github_rule(_group_event("/github list", at=True, mid=368)) is True
 
 
 # ---------- admin 触发规则 ----------

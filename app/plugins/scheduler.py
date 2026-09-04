@@ -6,7 +6,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.runtime import get_runtime
 from app.services.scheduler import SchedulerValidationError, parse_reminder_command
 from app.utils import send_local_reply
@@ -34,7 +34,9 @@ def parse_notification_command(text: str) -> tuple[str, bool]:
 async def _remind_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    text = event.message.extract_plain_text().strip().lower()
+    if not command_is_addressed(event):
+        return False
+    text = strip_bot_mention(event.message.extract_plain_text()).lower()
     if text == _REMIND or text.startswith(f"{_REMIND} "):
         return claim_message_id(str(event.message_id))
     return False
@@ -43,7 +45,9 @@ async def _remind_rule(event: MessageEvent) -> bool:
 async def _notify_rule(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if event.message.extract_plain_text().strip().lower().startswith(f"{_NOTIFY} "):
+    if not command_is_addressed(event):
+        return False
+    if strip_bot_mention(event.message.extract_plain_text()).lower().startswith(f"{_NOTIFY} "):
         return claim_message_id(str(event.message_id))
     return False
 
@@ -58,7 +62,7 @@ async def _handle_remind(event: MessageEvent):
     try:
         timezone_info = ZoneInfo(runtime.settings.scheduler_timezone)
         run_at, cron_expression, message = parse_reminder_command(
-            event.message.extract_plain_text(), timezone_info
+            strip_bot_mention(event.message.extract_plain_text()), timezone_info
         )
         settings = await runtime.notifications.get(str(event.user_id))
         if not settings["reminder_notify"]:
@@ -77,7 +81,7 @@ async def _handle_remind(event: MessageEvent):
 async def _handle_notify(event: MessageEvent):
     runtime = get_runtime()
     try:
-        field, enabled = parse_notification_command(event.message.extract_plain_text())
+        field, enabled = parse_notification_command(strip_bot_mention(event.message.extract_plain_text()))
         await runtime.notifications.set(str(event.user_id), **{field: enabled})
     except SchedulerValidationError as e:
         await send_local_reply(notify_matcher, runtime, f"格式错误：{e}")

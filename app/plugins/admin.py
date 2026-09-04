@@ -5,7 +5,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.matcher import Matcher
 from nonebot.rule import Rule
 
-from app.plugins.ai_chat import claim_message_id
+from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bot_mention
 from app.services.runtime import get_runtime
 from app.utils import send_local_reply
 
@@ -13,7 +13,9 @@ from app.utils import send_local_reply
 async def _status_trigger(event: MessageEvent) -> bool:
     if str(event.user_id) == str(event.self_id):
         return False
-    if event.message.extract_plain_text().strip() in ("/status", "/状态"):
+    if not command_is_addressed(event):
+        return False
+    if strip_bot_mention(event.message.extract_plain_text()) in ("/status", "/状态"):
         return claim_message_id(str(event.message_id))
     return False
 
