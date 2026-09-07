@@ -1,0 +1,10 @@
+[Unit]
+Description=Run NapCat OneBot connection watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=napcat-watchdog.service
+
+[Install]
+WantedBy=timers.target

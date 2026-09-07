@@ -1,0 +1,6 @@
+[Unit]
+Description=NapCat OneBot connection watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/napcat-watchdog
