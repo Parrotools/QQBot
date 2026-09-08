@@ -18,7 +18,7 @@ async def _agent_confirmation_rule(event: MessageEvent) -> bool:
     text = strip_bot_mention(event.message.extract_plain_text()).strip().lower()
     if text not in _CONFIRM_WORDS | _CANCEL_WORDS:
         return False
-    if text.startswith("/agent "):
+    if text in {"/agent confirm", "/agent cancel"}:
         return claim_message_id(str(event.message_id))
     try:
         runtime = get_runtime()
