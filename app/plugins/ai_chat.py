@@ -20,7 +20,7 @@ CHAT_SYSTEM_PROMPT = load_prompt("chat.txt")
 KNOWN_COMMANDS = {
     "/ai", "/clear", "/总结", "/summary", "/broadcast",
     "/confirm", "/cancel", "/status", "/状态", "/help", "/帮助", "/remember", "/memories", "/memory",
-    "/remind", "/notify", "/schedule", "/report", "/日报", "/agent",
+    "/remind", "/notify", "/schedule", "/github", "/report", "/日报", "/agent",
 }
 _DELEGATED_COMMANDS = {
     "/总结", "/summary", "/broadcast", "/confirm", "/cancel", "/status", "/状态",
@@ -42,7 +42,8 @@ HELP_TEXT = (
     "/schedule joke group:群号 cron:0 12 * * * -- 主题 —— 管理员定时生成主题段子\n"
     "/notify reminder|github|report on|off —— 开关提醒、GitHub 或日报通知\n"
     "/github add|remove|list|check|info —— GitHub 仓库监控\n"
-    "也可以直接说“把 owner/repo 加入我的 GitHub 列表”，修改操作会先请求确认\n"
+    "也可以直接描述 GitHub、记忆、提醒、通知、定时任务、日报、状态等操作；修改或发送操作会先请求确认\n"
+    "自然语言示例：记住我喜欢 HPC；每天 12 点在群里讲 mobile 段子；查看我的日报\n"
     "/agent confirm|cancel —— 确认或取消自然语言操作\n"
     "/github watch <URL> user:QQ号|group:群号 —— 仓库变化通知目标\n"
     "/github digest set user:QQ号1,user:QQ号2,group:群号 —— 设置定时汇总目标\n"

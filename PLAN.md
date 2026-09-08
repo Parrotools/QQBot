@@ -62,11 +62,11 @@ NapCatQQ  ──(OneBot 11 反向 WebSocket)──▶  NoneBot2 (Python 3.11+, a
      DNS 解析后校验 IP；**redirect 每一跳重新校验**并限制跳数；只允许 http/https。
    - Map-Reduce：按 `WEB_SUMMARY_CHUNK_CHARS` 切块、`WEB_SUMMARY_MAX_CHUNKS` 截断，
      分块摘要后合并出最终摘要，绝不整页塞给 LLM。
-5. **Prompt Injection 原则**：网页内容一律是不可信数据。总结链路拿不到 `MessageDispatcher`，
-   LLM 无任何工具调用能力，从架构上保证「网页让我发消息」不可能被执行。
+5. **Prompt Injection 原则**：网页内容一律是不可信数据。网页总结链路拿不到 `MessageDispatcher`，
+   核心聊天模型也没有工具调用能力；只有外层 Agent Harness 能调用固定白名单，且每个写操作都经过代码校验与确认。
 6. **发送能力隔离**：`MessageDispatcher`（send_user / send_group / broadcast）是唯一发送出口；
-   发送只能由确定性管理员命令或用户开启的定时通知任务触发，LLM 永远不能触发发送。每次发送写
-   `send_logs`（目标/时间/结果/message_id/错误）。
+   发送只能由确定性管理员命令、已确认的 Agent 管理员工具或用户开启的定时通知任务触发。核心聊天
+   LLM 永远不能直接触发发送。每次发送写 `send_logs`（目标/时间/结果/message_id/错误）。
 7. **群发安全阀**：仅 `ADMIN_QQ_IDS` 可用；`MAX_BROADCAST_RECIPIENTS`（默认 20）上限；
    `SEND_RATE_LIMIT_PER_SECOND=1` 逐条限速；`BROADCAST_REQUIRE_CONFIRM=true` 时先出预览，
    `/confirm` 在 TTL（5 分钟）内、且仅同一管理员可确认；`pending_broadcasts` 表持久化；
@@ -119,8 +119,7 @@ qq-llm-bot/
 - **trafilatura 在 Windows 依赖 lxml**，Python 3.11 有 wheel，正常 pip 可装。
 - **测试策略**：SSRF/URL/parser/session/chunking/memory/scheduler/github/report 纯逻辑用 pytest 覆盖；
   端到端链路需要真实 QQ 登录，作为手动验收清单而不是 CI 用例。
-- **后续扩展位**：在已有 Agent Tool Calling 的权限与二次确认框架上扩展提醒、通知和更复杂的管理员操作，
-  以及多实例部署。
+- **后续扩展位**：在已有 Agent Tool Calling 的权限与二次确认框架上继续接入新业务能力，以及多实例部署。
 
 ## 7. 验收场景（15 条）
 

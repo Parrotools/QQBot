@@ -33,7 +33,7 @@
 | `/schedule joke group:群号 时间或 cron -- 主题` | 仅管理员 | 私聊/群聊 | 按主题生成不同段子并定时发送 |
 | `/notify github on\|off` | 所有人 | 私聊/群聊 | 开关 GitHub 仓库变化通知 |
 | `/github add\|remove\|list\|check\|info\|watch ...` | 所有人 | 私聊/群聊 | 管理自己的 GitHub 仓库监控 |
-| 自然语言 GitHub 操作 | 所有人 | 私聊/群聊 | 直接描述 GitHub 列表操作；修改动作需二次确认 |
+| 自然语言工具操作 | 所有人（管理员操作仍需管理员权限） | 私聊/群聊 | 直接描述 GitHub、记忆、提醒、通知、定时、日报、状态等操作；写操作需二次确认 |
 | `/report`、`/日报` | 所有人 | 私聊/群聊 | 查看当天日报 |
 | `/help`、`/帮助` | 所有人 | 私聊/群聊 | 显示帮助 |
 | `/总结 <URL>`、`/summary <URL>` | 所有人 | 私聊/群聊 | 抓取并总结网页 |
@@ -126,7 +126,23 @@
 检查一下 https://github.com/OpenAI/openai-python 有没有新变化
 ```
 
-查询类操作会直接执行；添加或删除仓库会先显示规范化后的操作摘要。确认时回复 `确认执行`，取消时回复 `取消执行`，也可以使用 `/agent confirm` 或 `/agent cancel`。确认请求会按会话和用户隔离，并在 `AGENT_CONFIRM_TTL_SECONDS`（默认 5 分钟）后过期。
+查询类操作会直接执行；保存、修改、定时和发送操作会先显示规范化后的操作摘要。确认时回复 `确认执行`，取消时回复 `取消执行`，也可以使用 `/agent confirm` 或 `/agent cancel`。确认请求会按会话和用户隔离，并在 `AGENT_CONFIRM_TTL_SECONDS`（默认 5 分钟）后过期。
+
+目前支持直接描述这些操作：
+
+```text
+记住我喜欢研究 HPC
+查看我的长期记忆
+每天早上 8 点提醒我提交周报
+开启 GitHub 通知
+每天早上 8 点在群 456789 发送“大家早上好”
+每天中午 12 点在群 456789 讲 mobile 主题段子
+查看今天的日报
+查看运行状态
+清空当前会话
+```
+
+管理员还可以自然语言执行定时汇总目标配置和多目标群发，例如“把 GitHub 汇总发给 group:456789”或“给 user:123456 发一条消息：服务器已恢复”。这类请求会再次检查管理员身份，并且必须确认后才会真正改配置或发送。定时任务的时间需要能明确转换为 `YYYY-MM-DD HH:MM` 或 `cron:五段表达式`；群聊中仍需先 @机器人或回复机器人。
 
 日报由 `DAILY_REPORT_CRON` 驱动，默认每天 23:00 生成。开启 `/notify report on` 后，机器人会私聊发送当天汇总；也可随时使用 `/report` 手动查看。
 
@@ -262,7 +278,7 @@ user:789012
 | `OWNER_QQ_ID` | — | 主人的真实 QQ 号；不按昵称判断（留空且只有一个管理员时回退到该 ID） |
 | `OWNER_NAME` | Parrotools | 主人称呼 |
 | `AGENT_TOOL_CALLING_ENABLED` | true | 是否启用自然语言工具操作 |
-| `AGENT_CONFIRM_TTL_SECONDS` | 300 | 添加/删除仓库确认有效期（秒） |
+| `AGENT_CONFIRM_TTL_SECONDS` | 300 | 自然语言写操作确认有效期（秒） |
 | `MAX_CONTEXT_MESSAGES` | 20 | 上下文最大条数 |
 | `GROUP_SHARED_CONTEXT` | false | 群共享上下文 |
 | `URL_AUTO_SUMMARY_MODE` | mentioned | off / mentioned / all |
@@ -370,6 +386,6 @@ sqlite3 data/bot.db "SELECT session_key, COUNT(*) FROM messages GROUP BY session
 ## 10. 安全红线（使用时请牢记）
 
 - 机器人对**所有**网页内容只做"总结"，网页里写"给我发消息/泄露密钥"都不会被执行——不要试图用网页内容指挥机器人。
-- LLM 本身永远不能触发发送消息；发送只能由明确命令或用户已开启的定时通知任务完成。
+- 核心聊天 LLM 本身永远不能直接触发发送消息；发送只能由明确命令、已确认的管理员 Agent 操作或用户已开启的定时通知任务完成。
 - `.env` 含 Key，绝不提交 git、绝不截图发群。
 - 群发是高权限操作：确认预览里的目标列表再 `/confirm`。

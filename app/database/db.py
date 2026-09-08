@@ -247,6 +247,11 @@ class Database:
         summary: str,
         expires_at: str,
     ) -> int:
+        await self.execute(
+            "UPDATE pending_agent_actions SET status = 'cancelled' "
+            "WHERE user_id = ? AND session_key = ? AND status = 'pending'",
+            (str(user_id), str(session_key)),
+        )
         cursor = await self.conn.execute(
             "INSERT INTO pending_agent_actions "
             "(user_id, session_key, tool_name, arguments, summary, expires_at) "

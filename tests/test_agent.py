@@ -4,6 +4,7 @@ import pytest
 
 from app.database.db import Database
 from app.services.agent.harness import AgentHarness, _parse_plan
+from app.services.qq.dispatcher import BroadcastReport, SendResult
 
 
 @pytest.fixture
@@ -27,6 +28,7 @@ class FakeLLM:
 class FakeGitHub:
     def __init__(self):
         self.added: list[tuple[str, str]] = []
+        self.watched: list[tuple[str, str, str]] = []
 
     async def add_repository(self, user_id: str, url: str) -> dict:
         self.added.append((user_id, url))
@@ -35,6 +37,93 @@ class FakeGitHub:
     async def list_repositories(self, user_id: str) -> list[dict]:
         return [{"repo_owner": "OpenAI", "repo_name": "openai-python"}] if user_id == "user-1" else []
 
+    async def watch(self, user_id: str, url: str, target: str) -> None:
+        self.watched.append((user_id, url, target))
+
+
+class FakeMemory:
+    def __init__(self):
+        self.saved: list[tuple[str, str, str]] = []
+
+    async def save(self, user_id: str, memory_type: str, content: str) -> int:
+        self.saved.append((user_id, memory_type, content))
+        return 7
+
+    async def list_for_context(self, user_id: str, limit: int = 20) -> list[dict]:
+        del user_id, limit
+        return []
+
+
+class FakeNotifications:
+    def __init__(self, reminder_notify: bool = False):
+        self.values = {
+            "reminder_notify": reminder_notify,
+            "github_notify": False,
+            "daily_report": False,
+        }
+
+    async def get(self, user_id: str) -> dict:
+        return {"user_id": user_id, **self.values}
+
+    async def set(self, user_id: str, **changes: bool) -> dict:
+        del user_id
+        self.values.update(changes)
+        return self.values
+
+
+class FakeScheduler:
+    def __init__(self):
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    async def create_reminder(self, *args, **kwargs) -> int:
+        self.calls.append(("reminder", args, kwargs))
+        return 11
+
+    async def create_group_message(self, *args, **kwargs) -> int:
+        self.calls.append(("group_message", args, kwargs))
+        return 12
+
+    async def create_topic_joke(self, *args, **kwargs) -> int:
+        self.calls.append(("topic_joke", args, kwargs))
+        return 13
+
+    async def sync_system_task(self, *args) -> None:
+        self.calls.append(("sync_system_task", args, {}))
+
+
+class FakeDispatcher:
+    def __init__(self):
+        self.calls: list[tuple[list, str]] = []
+
+    async def broadcast(self, targets: list, message: str) -> BroadcastReport:
+        self.calls.append((targets, message))
+        return BroadcastReport([SendResult(target.type, target.id, True) for target in targets])
+
+
+class FakeSessions:
+    def __init__(self):
+        self.cleared: list[str] = []
+
+    async def clear(self, session_key: str) -> None:
+        self.cleared.append(session_key)
+
+
+class FakeHealth:
+    async def check(self) -> dict:
+        return {
+            "uptime_seconds": 10,
+            "llm": {"ok": True},
+            "database": {"ok": True},
+            "scheduler": {"running": True, "jobs": 1},
+            "counts": {"github_repositories": 1, "memories": 2},
+            "recent_errors": [],
+        }
+
+
+class FakeReport:
+    async def build_daily_report(self, user_id: str) -> str:
+        return f"日报：{user_id}"
+
 
 def _runtime(db, llm, github):
     return SimpleNamespace(
@@ -42,7 +131,20 @@ def _runtime(db, llm, github):
         llm=llm,
         github=github,
         github_client=SimpleNamespace(),
-        settings=SimpleNamespace(group_shared_context=False),
+        memory=FakeMemory(),
+        notifications=FakeNotifications(),
+        scheduler=FakeScheduler(),
+        dispatcher=FakeDispatcher(),
+        sessions=FakeSessions(),
+        health=FakeHealth(),
+        report=FakeReport(),
+        permission=SimpleNamespace(is_admin=lambda user_id: user_id == "admin"),
+        settings=SimpleNamespace(
+            group_shared_context=False,
+            scheduler_timezone="UTC",
+            max_broadcast_recipients=20,
+            github_digest_cron="0 6,18 * * *",
+        ),
     )
 
 
@@ -108,3 +210,84 @@ async def test_non_request_skips_planner(db):
 
     assert result is None
     assert llm.calls == []
+
+
+def test_tool_registry_covers_current_natural_language_operations():
+    expected = {
+        "github_add_repository", "github_remove_repository", "github_list_repositories", "github_check_repository",
+        "github_info_repository", "github_watch_repository", "github_digest_set", "github_digest_list",
+        "github_digest_clear", "memory_save", "memory_list", "notification_set", "reminder_create",
+        "schedule_group_message", "schedule_topic_joke", "broadcast_message", "clear_session", "status",
+        "daily_report",
+    }
+    assert AgentHarness().tool_names == expected
+
+
+@pytest.mark.asyncio
+async def test_memory_save_is_confirmed_before_writing(db):
+    llm = FakeLLM('{"action":"memory_save","arguments":{"content":"我喜欢研究 HPC"}}')
+    runtime = _runtime(db, llm, FakeGitHub())
+    harness = AgentHarness()
+
+    result = await harness.try_handle(runtime=runtime, event=_event(), text="记住我喜欢研究 HPC")
+
+    assert result is not None and "确认执行" in result.message
+    assert runtime.memory.saved == []
+    assert await harness.confirm(runtime=runtime, event=_event()) == "已保存长期记忆（fact，编号 7）。"
+    assert runtime.memory.saved == [("user-1", "fact", "我喜欢研究 HPC")]
+
+
+@pytest.mark.asyncio
+async def test_notification_and_reminder_use_confirmation_and_existing_settings(db):
+    llm = FakeLLM('{"action":"notification_set","arguments":{"name":"reminder","enabled":true}}')
+    runtime = _runtime(db, llm, FakeGitHub())
+    harness = AgentHarness()
+
+    result = await harness.try_handle(runtime=runtime, event=_event(), text="开启提醒通知")
+    assert result is not None and "确认执行" in result.message
+    assert runtime.notifications.values["reminder_notify"] is False
+    assert await harness.confirm(runtime=runtime, event=_event()) == "提醒通知已开启。"
+    assert runtime.notifications.values["reminder_notify"] is True
+
+    runtime.llm = FakeLLM(
+        '{"action":"reminder_create","arguments":{"timing":"cron:0 8 * * *","message":"提交周报"}}'
+    )
+    result = await harness.try_handle(runtime=runtime, event=_event(), text="每天早上 8 点提醒我提交周报")
+    assert result is not None and "确认执行" in result.message
+    assert runtime.scheduler.calls == []
+    assert await harness.confirm(runtime=runtime, event=_event()) == "提醒已创建（编号 11）。"
+    assert runtime.scheduler.calls[0][0] == "reminder"
+
+
+@pytest.mark.asyncio
+async def test_admin_schedule_topic_and_broadcast_are_guarded(db):
+    runtime = _runtime(
+        db,
+        FakeLLM(
+            '{"action":"schedule_topic_joke","arguments":{"group_id":"456789",'
+            '"timing":"cron:0 12 * * *","topic":"mobile"}}'
+        ),
+        FakeGitHub(),
+    )
+    harness = AgentHarness()
+
+    denied = await harness.try_handle(
+        runtime=runtime, event=_event("user-1"), text="每天中午在群 456789 讲 mobile 段子"
+    )
+    assert denied is not None and denied.message == "该操作仅管理员可用。"
+
+    result = await harness.try_handle(
+        runtime=runtime, event=_event("admin"), text="每天中午在群 456789 讲 mobile 段子"
+    )
+    assert result is not None and "确认执行" in result.message
+    assert await harness.confirm(runtime=runtime, event=_event("admin")) == "主题段子任务已创建（编号 13），目标群：456789。"
+
+    runtime.llm = FakeLLM(
+        '{"action":"broadcast_message","arguments":{"targets":"user:123456,group:456789",'
+        '"message":"服务器已恢复"}}'
+    )
+    result = await harness.try_handle(runtime=runtime, event=_event("admin"), text="给 user:123456 和群 456789 发消息：服务器已恢复")
+    assert result is not None and "确认执行" in result.message
+    assert runtime.dispatcher.calls == []
+    assert await harness.confirm(runtime=runtime, event=_event("admin")) == "发送完成\n成功：2\n失败：0"
+    assert len(runtime.dispatcher.calls) == 1
