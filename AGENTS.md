@@ -6,5 +6,5 @@
 - 技术栈：Python 3.11+、asyncio、NoneBot2、httpx、aiosqlite、SQLite、APScheduler。
 - 目录：`app/plugins` 负责事件入口，`app/services` 负责业务，`app/database` 负责 SQL，`app/security` 负责权限/SSRF/注入防护。
 - 约定：业务层 ID 使用 `str`；数据库访问集中在 `Database`；所有主动 QQ 发送经过 `MessageDispatcher`；密钥只来自环境变量，不写日志。
-- 当前状态（2026-09-01）：Personality、Memory、Scheduler、GitHub Tracker、日报和对应测试已实现；当前工作区改动尚未提交。
-- 下一步：完成真实 QQ/NapCat 手动验收后，再决定是否扩展周报或 Agent Tool Calling。
+- 当前状态（2026-09-08）：Personality、Memory、Scheduler、GitHub Tracker、日报、Agent Harness 和对应测试已实现；真实 QQ/NapCat 链路已手动验收。
+- 下一步：在真实 QQ/NapCat 上验收自然语言 GitHub 操作，再按相同的权限与确认模式扩展其它工具。

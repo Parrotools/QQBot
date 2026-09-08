@@ -33,6 +33,7 @@
 | `/schedule joke group:群号 时间或 cron -- 主题` | 仅管理员 | 私聊/群聊 | 按主题生成不同段子并定时发送 |
 | `/notify github on\|off` | 所有人 | 私聊/群聊 | 开关 GitHub 仓库变化通知 |
 | `/github add\|remove\|list\|check\|info\|watch ...` | 所有人 | 私聊/群聊 | 管理自己的 GitHub 仓库监控 |
+| 自然语言 GitHub 操作 | 所有人 | 私聊/群聊 | 直接描述 GitHub 列表操作；修改动作需二次确认 |
 | `/report`、`/日报` | 所有人 | 私聊/群聊 | 查看当天日报 |
 | `/help`、`/帮助` | 所有人 | 私聊/群聊 | 显示帮助 |
 | `/总结 <URL>`、`/summary <URL>` | 所有人 | 私聊/群聊 | 抓取并总结网页 |
@@ -116,6 +117,16 @@
 ```
 
 `add` 后才能 `check` 或 `watch`。自动检查由 `GITHUB_CHECK_CRON` 驱动，检测到最新 commit、Star、Fork、开放 Issue 或 Release 变化时才通知。群通知目标 `group:群号` 仅管理员可配置。
+
+也可以直接用自然语言描述 GitHub 操作：
+
+```text
+把 OpenAI/openai-python 加入我的 GitHub 列表
+看看我监控了哪些仓库
+检查一下 https://github.com/OpenAI/openai-python 有没有新变化
+```
+
+查询类操作会直接执行；添加或删除仓库会先显示规范化后的操作摘要。确认时回复 `确认执行`，取消时回复 `取消执行`，也可以使用 `/agent confirm` 或 `/agent cancel`。确认请求会按会话和用户隔离，并在 `AGENT_CONFIRM_TTL_SECONDS`（默认 5 分钟）后过期。
 
 日报由 `DAILY_REPORT_CRON` 驱动，默认每天 23:00 生成。开启 `/notify report on` 后，机器人会私聊发送当天汇总；也可随时使用 `/report` 手动查看。
 
@@ -250,6 +261,8 @@ user:789012
 | `PERSONALITY_FILE` | app/personality/rumi.yaml | YAML 人格配置路径 |
 | `OWNER_QQ_ID` | — | 主人的真实 QQ 号；不按昵称判断（留空且只有一个管理员时回退到该 ID） |
 | `OWNER_NAME` | Parrotools | 主人称呼 |
+| `AGENT_TOOL_CALLING_ENABLED` | true | 是否启用自然语言工具操作 |
+| `AGENT_CONFIRM_TTL_SECONDS` | 300 | 添加/删除仓库确认有效期（秒） |
 | `MAX_CONTEXT_MESSAGES` | 20 | 上下文最大条数 |
 | `GROUP_SHARED_CONTEXT` | false | 群共享上下文 |
 | `URL_AUTO_SUMMARY_MODE` | mentioned | off / mentioned / all |

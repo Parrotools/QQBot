@@ -20,11 +20,11 @@ CHAT_SYSTEM_PROMPT = load_prompt("chat.txt")
 KNOWN_COMMANDS = {
     "/ai", "/clear", "/总结", "/summary", "/broadcast",
     "/confirm", "/cancel", "/status", "/状态", "/help", "/帮助", "/remember", "/memories", "/memory",
-    "/remind", "/notify", "/schedule", "/report", "/日报",
+    "/remind", "/notify", "/schedule", "/report", "/日报", "/agent",
 }
 _DELEGATED_COMMANDS = {
     "/总结", "/summary", "/broadcast", "/confirm", "/cancel", "/status", "/状态",
-    "/remember", "/memories", "/memory", "/remind", "/notify", "/schedule", "/github", "/report", "/日报",
+    "/remember", "/memories", "/memory", "/remind", "/notify", "/schedule", "/github", "/report", "/日报", "/agent",
 }
 
 HELP_TEXT = (
@@ -42,6 +42,8 @@ HELP_TEXT = (
     "/schedule joke group:群号 cron:0 12 * * * -- 主题 —— 管理员定时生成主题段子\n"
     "/notify reminder|github|report on|off —— 开关提醒、GitHub 或日报通知\n"
     "/github add|remove|list|check|info —— GitHub 仓库监控\n"
+    "也可以直接说“把 owner/repo 加入我的 GitHub 列表”，修改操作会先请求确认\n"
+    "/agent confirm|cancel —— 确认或取消自然语言操作\n"
     "/github watch <URL> user:QQ号|group:群号 —— 仓库变化通知目标\n"
     "/github digest set user:QQ号1,user:QQ号2,group:群号 —— 设置定时汇总目标\n"
     "/github digest list|clear —— 查看或清空定时汇总目标\n"
@@ -431,6 +433,16 @@ async def _handle(event: MessageEvent):
         return
 
     history = await runtime.sessions.get_context(session_key)
+    agent = getattr(runtime, "agent", None)
+    if getattr(runtime.settings, "agent_tool_calling_enabled", True) and agent is not None:
+        agent_result = await agent.try_handle(
+            runtime=runtime, event=event, text=text, history=history
+        )
+        if agent_result is not None and agent_result.handled:
+            await runtime.sessions.append(session_key, "user", text)
+            await runtime.sessions.append(session_key, "assistant", agent_result.message)
+            await send_local_reply(matcher, runtime, agent_result.message)
+            return
     memory_context = await runtime.memory.context_prompt(str(event.user_id))
     prompt_text = await _with_reply_context(event, text)
     messages, context = _build_chat_messages(

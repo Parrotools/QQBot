@@ -161,9 +161,27 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_content_history_task
     ON scheduled_content_history(task_id, id DESC);
 """
 
+AGENT_ACTION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pending_agent_actions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    session_key  TEXT NOT NULL,
+    tool_name    TEXT NOT NULL,
+    arguments    TEXT NOT NULL,
+    summary      TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK(status IN ('pending', 'executing', 'confirmed', 'cancelled', 'expired', 'failed')),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pending_agent_actions_lookup
+    ON pending_agent_actions(user_id, session_key, status, id DESC);
+"""
+
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, SCHEMA),
     (2, OUTBOUND_MESSAGES_SCHEMA),
     (3, GITHUB_DIGEST_SCHEMA),
     (4, SCHEDULED_CONTENT_HISTORY_SCHEMA),
+    (5, AGENT_ACTION_SCHEMA),
 )

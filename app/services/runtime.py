@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.database.db import Database
 from app.personality.manager import PersonalityManager
 from app.security.permissions import PermissionService
+from app.services.agent import AgentHarness
 from app.services.github.client import GitHubClient
 from app.services.github.tracker import GitHubTracker
 from app.services.health import HealthService
@@ -49,6 +50,7 @@ class Runtime:
     playwright_fetcher: PlaywrightFetcher | None
     summarizer: WebSummarizer
     web_semaphore: asyncio.Semaphore
+    agent: AgentHarness
 
 
 _runtime: Runtime | None = None
@@ -137,6 +139,7 @@ async def init_runtime() -> Runtime:
         playwright_fetcher=playwright_fetcher,
         summarizer=summarizer,
         web_semaphore=asyncio.Semaphore(max(1, settings.max_concurrent_web_tasks)),
+        agent=AgentHarness(confirmation_ttl_seconds=settings.agent_confirm_ttl_seconds),
     )
     await dispatcher.start()
     await scheduler.start()

@@ -119,8 +119,8 @@ qq-llm-bot/
 - **trafilatura 在 Windows 依赖 lxml**，Python 3.11 有 wheel，正常 pip 可装。
 - **测试策略**：SSRF/URL/parser/session/chunking/memory/scheduler/github/report 纯逻辑用 pytest 覆盖；
   端到端链路需要真实 QQ 登录，作为手动验收清单而不是 CI 用例。
-- **后续扩展位**：GROUP_SHARED_CONTEXT、PlaywrightFetcher、Agent Tool Calling（需二次确认设计）、
-  多实例部署——本期一律只留接口不留实现。
+- **后续扩展位**：在已有 Agent Tool Calling 的权限与二次确认框架上扩展提醒、通知和更复杂的管理员操作，
+  以及多实例部署。
 
 ## 7. 验收场景（15 条）
 

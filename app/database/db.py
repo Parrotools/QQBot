@@ -236,6 +236,67 @@ class Database:
             (task_id, content),
         )
 
+    # ---------- agent actions ----------
+
+    async def create_pending_agent_action(
+        self,
+        user_id: str,
+        session_key: str,
+        tool_name: str,
+        arguments: str,
+        summary: str,
+        expires_at: str,
+    ) -> int:
+        cursor = await self.conn.execute(
+            "INSERT INTO pending_agent_actions "
+            "(user_id, session_key, tool_name, arguments, summary, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(user_id), str(session_key), str(tool_name), arguments, summary[:1000], expires_at),
+        )
+        await self.conn.commit()
+        return int(cursor.lastrowid)
+
+    async def fetch_pending_agent_action(self, user_id: str, session_key: str, now: str) -> dict | None:
+        await self.execute(
+            "UPDATE pending_agent_actions SET status = 'expired' "
+            "WHERE user_id = ? AND session_key = ? AND status = 'pending' AND expires_at <= ?",
+            (str(user_id), str(session_key), now),
+        )
+        return await self.fetchone(
+            "SELECT * FROM pending_agent_actions "
+            "WHERE user_id = ? AND session_key = ? AND status = 'pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (str(user_id), str(session_key)),
+        )
+
+    async def claim_pending_agent_action(
+        self, user_id: str, session_key: str, now: str
+    ) -> dict | None:
+        pending = await self.fetch_pending_agent_action(user_id, session_key, now)
+        if pending is None:
+            return None
+        async with self.conn.execute(
+            "UPDATE pending_agent_actions SET status = 'executing' "
+            "WHERE id = ? AND status = 'pending'",
+            (pending["id"],),
+        ) as cursor:
+            await self.conn.commit()
+            if cursor.rowcount != 1:
+                return None
+        pending["status"] = "executing"
+        return pending
+
+    async def finish_pending_agent_action(self, action_id: int, status: str) -> bool:
+        if status not in {"confirmed", "cancelled", "failed", "expired"}:
+            raise ValueError("无效的 agent action 状态")
+        async with self.conn.execute(
+            "UPDATE pending_agent_actions SET status = ? "
+            "WHERE id = ? AND status IN ('pending', 'executing')",
+            (status, int(action_id)),
+        ) as cursor:
+            await self.conn.commit()
+            return cursor.rowcount == 1
+
     # ---------- notification_settings ----------
 
     async def fetch_notification_settings(self, user_id: str) -> dict | None:

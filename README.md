@@ -11,6 +11,7 @@
 - 一次性与 cron 定时提醒（通知默认关闭）以及管理员定时群发固定消息
 - 管理员定时按主题生成不同段子并发送到群
 - GitHub 仓库监控：手动检查、commit/Star/Fork/Issue/Release 变化通知
+- 自然语言工具操作：可直接说“把 owner/repo 加入我的 GitHub 列表”，由白名单工具执行并对修改操作二次确认
 - 每日日报：汇总 GitHub 变化、任务/提醒和重要记忆，可手动查看
 - 网页总结：识别消息中的 URL，抓取正文，超长网页 Map-Reduce 分块总结；URL 结果进程内缓存（TTL 可配）；可选 Playwright 渲染兜底
 - 主动发送 / 多目标群发（仅管理员，带预览确认、TTL、限速、逐目标结果记录、旧待确认任务自动作废）
@@ -31,8 +32,8 @@ NapCatQQ                    ← 只负责 QQ 协议 ↔ OneBot 11 转换
 NoneBot2 (FastAPI 驱动, ws://127.0.0.1:8080/onebot/v11/ws)
    │
    ├─ app/personality/    YAML 人格配置与加载
-   ├─ app/plugins/        事件路由：ai_chat / web_summary / memory / scheduler / github / report / broadcast / admin
-   ├─ app/services/       业务层：LLM Gateway、网页管道、会话、记忆、Scheduler、GitHub、Report、MessageDispatcher
+   ├─ app/plugins/        事件路由：ai_chat / agent / web_summary / memory / scheduler / github / report / broadcast / admin
+   ├─ app/services/       业务层：LLM Gateway、Agent Harness、网页管道、会话、记忆、Scheduler、GitHub、Report、MessageDispatcher
    ├─ app/security/       权限、SSRF、Prompt Injection 防御
    └─ app/database/       SQLite (aiosqlite)：sessions / messages / memories / scheduled_tasks / GitHub 快照 / send_logs
 ```
@@ -105,6 +106,8 @@ cp .env.example .env      # Windows: copy .env.example .env
 | `PERSONALITY_FILE` | 人格 YAML 文件路径，默认 `app/personality/rumi.yaml` |
 | `OWNER_QQ_ID` | 主人的真实 QQ 号；只按此 ID 识别主人，不按昵称猜测（留空且只有一个管理员时回退到该 ID） |
 | `OWNER_NAME` | 主人称呼，默认 `Parrotools` |
+| `AGENT_TOOL_CALLING_ENABLED` | 是否启用自然语言工具操作，默认 `true` |
+| `AGENT_CONFIRM_TTL_SECONDS` | 自然语言修改操作的确认有效期，默认 300 秒 |
 | `NON_LLM_REPLY_DELAY_MIN_SECONDS` / `_MAX_SECONDS` | 不调用 LLM 回复的动态延迟范围，默认 2～6 秒；最大值设为 0 可关闭 |
 | `NON_LLM_REPLY_DELAY_CHARS_PER_SECOND` | 动态延迟的文本处理速度，默认每秒 35 个字符 |
 
@@ -179,6 +182,7 @@ python bot.py
 | 权限拒绝 | 非管理员发 `/broadcast ...` | "该命令仅管理员可用。" |
 | 重复 /broadcast | 管理员连续两次 /broadcast | 只保留最新一条待确认，旧的自动作废 |
 | GitHub 监控 | `/github add https://github.com/owner/repo` | 添加仓库后可手动检查或接收变化通知 |
+| 自然语言 GitHub 操作 | `把 OpenAI/openai-python 加入我的 GitHub 列表` | 自动识别为受限工具；添加/删除需回复“确认执行” |
 | 每日日报 | `/report` | 查看当天 GitHub、任务和重要记忆汇总 |
 
 GitHub 定时汇总的时间通过 `.env` 配置，收件人和发送群通过管理员命令设置。下面的配置会在上海时间每天 06:00 和 18:00，查询全部已登记仓库的最新 commit，并将包含 commit 时间、作者和消息的同一份汇总发送给指定目标：
@@ -223,7 +227,8 @@ ADMIN_QQ_IDS=111111,222222
 
 - **SSRF**：所有抓取先用 `ipaddress` 做 scheme + DNS 解析后 IP 校验（loopback / RFC1918 / link-local（含 169.254.169.254 云 metadata）/ 组播 / 保留段全部拒绝），重定向每一跳重新校验，最多 5 跳，只允许 http/https，响应体有大小上限。已知限制：校验与请求之间存在 DNS rebinding 的理论窗口，生产环境可加自建解析 pin。
 - **Prompt Injection**：网页内容永远包在 `<untrusted_web_content>` 定界符内送入 LLM，system prompt 明确声明其中任何指令无效；总结链路代码中不存在 `MessageDispatcher` 引用，网页内容在架构上不可能触发 QQ 发送。
-- **发送权限**：`MessageDispatcher` 是唯一发送出口；主动发送只能来自管理员命令或用户已开启的定时通知任务，LLM 无工具调用能力。
+- **发送权限**：`MessageDispatcher` 是唯一发送出口；主动发送只能来自管理员命令或用户已开启的定时通知任务。自然语言 Agent 目前只注册 GitHub 工具，不能发送 QQ 消息。
+- **Agent Harness**：LLM 只能返回白名单中的结构化工具名和参数；参数由业务代码再次校验。只读查询直接执行，添加/删除仓库先写入 SQLite 待确认队列，确认后原子领取，避免重复执行。
 - **群发**：管理员专属 + 数量上限（默认 20）+ 限速（默认 1 条/秒）+ 预览确认（TTL 5 分钟、发起人本人可确认、仅可执行一次、重复下发自动作废旧任务）。
 - **敏感数据**：`.env` 已在 `.gitignore`；日志不输出 API Key，网页正文与发送内容截断后入库。
 - **优雅关闭**：Bot 停机时自动释放 LLM/抓取 HTTP 客户端与数据库连接。
@@ -291,4 +296,4 @@ ruff check app tests
 - `GROUP_SHARED_CONTEXT=true`（已支持）群共享上下文
 - `ENABLE_PLAYWRIGHT=true`（已支持）JS 页面渲染兜底，抓取失败自动降级
 - `WEB_CACHE_TTL_SECONDS`（已支持）URL 抓取缓存
-- Agent Tool Calling（需要二次确认设计，本期刻意不做）
+- 扩展 Agent Harness 工具注册表（提醒、通知和更复杂的管理员操作需分别设计权限与确认流程）

@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     max_concurrent_web_tasks: int = 3
     max_concurrent_llm_tasks: int = 5
 
+    # 自然语言工具调用
+    agent_tool_calling_enabled: bool = True
+    agent_confirm_ttl_seconds: int = 300
+
     # 定时任务
     scheduler_timezone: str = "Asia/Shanghai"
     github_token: str = ""
