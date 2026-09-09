@@ -207,6 +207,10 @@ async def test_deterministic_private_commands_are_delegated_from_chat():
     assert await report_plugin._report_rule(_private_event("/report", mid=353)) is True
 
 
+async def test_schedule_rule_returns_false_for_non_matching_private_message():
+    assert await scheduler_plugin._schedule_rule(_private_event("你好", mid=354)) is False
+
+
 async def test_group_commands_require_explicit_bot_mention():
     assert await admin_plugin._status_trigger(_group_event("/status", mid=360)) is False
     assert await broadcast_plugin._broadcast_rule(_group_event("/broadcast user:123 -- hi", mid=361)) is False

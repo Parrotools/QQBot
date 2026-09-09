@@ -66,6 +66,7 @@ async def _schedule_rule(event: MessageEvent) -> bool:
     text = strip_bot_mention(event.message.extract_plain_text()).lower()
     if text == _SCHEDULE or text.startswith(f"{_SCHEDULE} "):
         return claim_message_id(str(event.message_id))
+    return False
 
 
 remind_matcher = on_message(rule=Rule(_remind_rule), priority=7, block=True)
