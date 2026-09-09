@@ -24,7 +24,7 @@ onebot_connected() {
 
 manual_auth_required() {
     journalctl -u napcat.service --since "15 minutes ago" --no-pager -o cat \
-        | grep -qE '密码回退需要验证码|密码回退需要新设备验证|需要验证码|新设备需要扫码验证|异常设备需要验证'
+        | grep -qE '密码回退需要验证码|密码回退需要新设备验证|需要验证码|新设备需要扫码验证|异常设备需要验证|请扫描下面的二维码|登录态已失效|请重新登录'
 }
 
 if manual_auth_required; then
