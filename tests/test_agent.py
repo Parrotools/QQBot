@@ -187,6 +187,28 @@ async def test_mutating_tool_is_pending_until_confirmation(db):
 
 
 @pytest.mark.asyncio
+async def test_repo_referent_resolves_latest_user_github_url(db):
+    llm = FakeLLM('{"action":"github_add_repository","arguments":{"url":"这个仓库"}}')
+    github = FakeGitHub()
+    runtime = _runtime(db, llm, github)
+    harness = AgentHarness()
+    history = [{"role": "user", "content": "帮我总结 https://github.com/Parrotools/RumiHelper"}]
+
+    result = await harness.try_handle(
+        runtime=runtime,
+        event=_event(),
+        text="把这个仓库加入仓库列表里",
+        history=history,
+    )
+
+    assert result is not None and "确认执行" in result.message
+    pending = await db.fetchone("SELECT arguments FROM pending_agent_actions", ())
+    assert pending["arguments"] == '{"url":"https://github.com/Parrotools/RumiHelper"}'
+    assert await harness.confirm(runtime=runtime, event=_event()) == "已添加仓库 OpenAI/openai-python。"
+    assert github.added == [("user-1", "https://github.com/Parrotools/RumiHelper")]
+
+
+@pytest.mark.asyncio
 async def test_read_only_tool_runs_without_confirmation(db):
     llm = FakeLLM('{"action":"github_list_repositories","arguments":{}}')
     github = FakeGitHub()

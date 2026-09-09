@@ -23,6 +23,7 @@ from app.services.notifications import NotificationSettingsError
 from app.services.qq.broadcast_parser import BroadcastFormatError, parse_targets
 from app.services.report import ReportError
 from app.services.scheduler import SchedulerValidationError, parse_reminder_command
+from app.services.web.url_parser import extract_urls
 from app.utils import truncate_for_qq
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,9 @@ class AgentHarness:
         if tool is None:
             return None
         try:
-            arguments = self._normalize_arguments(tool.name, plan["arguments"], runtime)
+            arguments = self._normalize_arguments(
+                tool.name, plan["arguments"], runtime, history=history or [], request_text=text
+            )
         except AgentArgumentError as exc:
             return AgentResult(True, f"参数不合法：{exc}")
         if arguments is None:
@@ -387,18 +390,24 @@ class AgentHarness:
         }
 
     def _normalize_arguments(
-        self, tool_name: str, arguments: Mapping[str, Any], runtime: Any
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        runtime: Any,
+        *,
+        history: list[dict] | None = None,
+        request_text: str = "",
     ) -> dict[str, Any] | None:
         if not isinstance(arguments, Mapping):
             return None
         if tool_name in _EMPTY_TOOLS:
             return {} if not arguments else None
         if tool_name in {"github_add_repository", "github_remove_repository", "github_check_repository", "github_info_repository"}:
-            return {"url": self._normalize_repo(arguments)}
+            return {"url": self._normalize_repo(arguments, history=history, request_text=request_text)}
         if tool_name == "github_watch_repository":
             if set(arguments) != {"url", "target"}:
                 return None
-            url = self._normalize_repo({"url": arguments.get("url")})
+            url = self._normalize_repo({"url": arguments.get("url")}, history=history, request_text=request_text)
             target = self._normalize_target(arguments.get("target"))
             return {"url": url, "target": target}
         if tool_name == "github_digest_set":
@@ -448,10 +457,18 @@ class AgentHarness:
         return None
 
     @staticmethod
-    def _normalize_repo(arguments: Mapping[str, Any]) -> str:
-        if set(arguments) != {"url"}:
+    def _normalize_repo(
+        arguments: Mapping[str, Any], *, history: list[dict] | None = None, request_text: str = ""
+    ) -> str:
+        if set(arguments) - {"url"}:
             raise AgentArgumentError("需要一个 GitHub 仓库 URL 或 owner/repo")
         value = str(arguments.get("url", "")).strip()
+        if not value or _is_repo_referent(value):
+            value = _latest_github_url([*(history or []), {"role": "user", "content": request_text}]) or ""
+        else:
+            urls = extract_urls(value)
+            if urls:
+                value = urls[0]
         if _GITHUB_REPO_SHORTHAND.fullmatch(value):
             value = f"https://github.com/{value}"
         try:
@@ -555,6 +572,10 @@ _EMPTY_TOOLS = frozenset(
         "daily_report",
     }
 )
+_REPO_REFERENTS = frozenset(
+    {"这个仓库", "该仓库", "上面那个仓库", "刚才那个仓库", "这个repo", "该repo", "the repo", "it"}
+)
+_NORMALIZED_REPO_REFERENTS = frozenset("".join(item.lower().split()) for item in _REPO_REFERENTS)
 _SERVICE_ERRORS = (
     GitHubAPIError,
     GitHubTrackerError,
@@ -615,6 +636,23 @@ def _session_key(event: Any, runtime: Any) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _is_repo_referent(value: str) -> bool:
+    normalized = "".join(value.lower().split())
+    return normalized in _NORMALIZED_REPO_REFERENTS
+
+
+def _latest_github_url(history: list[dict]) -> str | None:
+    for item in reversed(history):
+        if item.get("role") != "user":
+            continue
+        for url in reversed(extract_urls(str(item.get("content", "")))):
+            try:
+                return parse_repo_url(url).url
+            except GitHubTrackerError:
+                continue
+    return None
 
 
 def _parse_plan(raw: str, tool_names: frozenset[str]) -> dict[str, Any] | None:

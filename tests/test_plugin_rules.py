@@ -146,6 +146,13 @@ async def test_summary_does_not_steal_other_slash_commands_with_urls(monkeypatch
     ) is False
 
 
+async def test_summary_does_not_steal_github_agent_operation_with_url(monkeypatch):
+    _patch_mode(monkeypatch, "mentioned")
+    assert await web_summary._trigger(
+        _private_event("把 https://github.com/Parrotools/RumiHelper 加入我的仓库列表", mid=210)
+    ) is False
+
+
 async def test_summary_group_url_requires_at(monkeypatch):
     """场景 5：@机器人 + URL 自动总结；未 @ 不自动。"""
     _patch_mode(monkeypatch, "mentioned")

@@ -19,6 +19,7 @@ from app.plugins.ai_chat import claim_message_id, command_is_addressed, strip_bo
 from app.security.ssrf import SSRFBlockedError
 from app.services.llm.base import LLMError
 from app.services.runtime import Runtime, get_runtime
+from app.services.session.manager import SessionManager
 from app.services.web.extractor import ExtractionError, extract
 from app.services.web.fetcher import (
     FetchError,
@@ -31,6 +32,9 @@ from app.utils import send_local_reply, truncate_for_qq
 
 SUMMARY_COMMANDS = ("/总结", "/summary")
 MAX_URLS_PER_MESSAGE = 3
+_GITHUB_AGENT_HINTS = (
+    "添加", "加入", "移除", "删除", "监控", "列表", "检查", "查询", "查看信息", "watch", "add", "remove", "check", "info",
+)
 
 
 def _strip_command(text: str) -> str:
@@ -53,6 +57,9 @@ async def _trigger(event: MessageEvent) -> bool:
         return False
     # 其他斜杠命令（例如 /github add <URL>）交给对应命令插件，不能被 URL 自动总结抢走。
     if text.startswith("/") and not is_command:
+        return False
+    # 带 GitHub URL 的明确操作交给 Agent Harness；否则“把这个仓库加入列表”会先被网页总结抢走。
+    if not is_command and _looks_like_github_operation(text):
         return False
     mode = get_runtime().settings.url_auto_summary_mode
 
@@ -90,8 +97,27 @@ async def _handle(event: MessageEvent, matcher_: Matcher):
         await send_local_reply(matcher_, runtime, "用法：/总结 <网页URL>（可一次给多个，最多同时处理 3 个）")
         return
 
+    # 网页总结不进入 AI 回复流程，但保留用户发过的 URL，供下一句“这个仓库”做确定性指代解析。
+    await runtime.sessions.append(_session_key(event, runtime), "user", text)
+
     for url in urls[:MAX_URLS_PER_MESSAGE]:
         await _summarize_one(matcher_, runtime, url, notice=is_command)
+
+
+def _looks_like_github_operation(text: str) -> bool:
+    urls = extract_urls(text)
+    return bool(
+        any("github.com" in url.lower() for url in urls)
+        and any(hint in text.lower() for hint in _GITHUB_AGENT_HINTS)
+    )
+
+
+def _session_key(event: MessageEvent, runtime: Runtime) -> str:
+    if isinstance(event, GroupMessageEvent):
+        return SessionManager.group_key(
+            str(event.group_id), str(event.user_id), runtime.settings.group_shared_context
+        )
+    return SessionManager.private_key(str(event.user_id))
 
 
 async def _fetch_document(runtime: Runtime, url: str):
